@@ -1,4 +1,4 @@
 <img src="nomadImg.jpg" width="500" height="300">
 
 # Nomad
-Detection vectors of manually mapped drivers
+Usage of detection vectors of manually mapped kernel code and suspicious threads
