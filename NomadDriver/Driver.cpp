@@ -77,7 +77,7 @@ NTSTATUS NomadDrv::DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_S
         return STATUS_SUCCESS;
     }
     
-    //EnumKernelModuleInfo((ZwQuerySysInfoPtr)pWinPrims[ZW_QUERY_INFO]);
+    Utility::EnumKernelModuleInfo();
     //PsInitialSystemProcess()
     //EnumSystemThreads((PsInitialSystemProcessPtr))
 

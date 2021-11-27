@@ -65,14 +65,12 @@ extern "C" {
 }
 
 namespace NomadDrv {
-	extern "C" GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];
-	//extern "C" GenericFuncPtr(pWinPrims[WINAPI_IMPORT_COUNT]);
-	extern "C" PRTL_PROCESS_MODULES outProcMods;
-	extern "C" ZwQuerySysInfoPtr pZwQuerySysInfo;
+	extern GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];
+	extern PRTL_PROCESS_MODULES outProcMods;
+	extern ZwQuerySysInfoPtr pZwQuerySysInfo;
 
-	extern "C" {
-		NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
-	}
+
+	NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
 
 	NTSTATUS Create(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
 	NTSTATUS Close(_In_ PDEVICE_OBJECT DeviceObject, PIRP Irp);

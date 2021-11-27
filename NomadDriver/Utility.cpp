@@ -56,6 +56,12 @@ NTSTATUS Utility::EnumKernelModuleInfo() {
     NomadDrv::outProcMods = NULL;
 
     // test our pointer
+    if (!NomadDrv::pZwQuerySysInfo)
+    {
+        KdPrint(("[NOMAD] [ERROR]pZwQuerySysInf == NULL"));
+        return STATUS_UNSUCCESSFUL;
+    }
+
     NTSTATUS status = NomadDrv::pZwQuerySysInfo(SYSTEM_MODULE_INFORMATION, 0, 0, &size);
     if (STATUS_INFO_LENGTH_MISMATCH == status) {
         KdPrint(("[NOMAD] [INFO] ZwQuerySystemInformation test successed, status: %08x", status));
@@ -127,6 +133,8 @@ NTSTATUS Utility::ImportWinPrimitives()
             KdPrint(("[NOMAD] [INFO] Succesfully imported %ls at %p\n", uniNames[i].Buffer, NomadDrv::pWinPrims[i]));
         }
     }
+
+    NomadDrv::pZwQuerySysInfo = (ZwQuerySysInfoPtr)NomadDrv::pWinPrims[ZW_QUERY_INFO];
 
     return STATUS_SUCCESS;
 }
