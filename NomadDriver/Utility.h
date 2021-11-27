@@ -6,5 +6,4 @@ namespace Utility
 	NTSTATUS EnumKernelModuleInfo();
 	NTSTATUS ImportWinPrimitives();
 	NTSTATUS EnumSysThreadInfo();
-	void MakeSysCall();
 }
