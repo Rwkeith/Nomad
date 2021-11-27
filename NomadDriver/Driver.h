@@ -3,7 +3,6 @@
 #include <windef.h>
 #include <ntstrsafe.h>
 #include "PEHdr.h"
-#pragma comment(lib, "ntoskrnl.lib")
 
 #define MAX_NAME_LEN 25
 #define WINAPI_IMPORT_COUNT 1
@@ -35,43 +34,49 @@ typedef struct _RTL_PROCESS_MODULES
 	RTL_PROCESS_MODULE_INFORMATION Modules[1];
 } RTL_PROCESS_MODULES, * PRTL_PROCESS_MODULES;
 
-//extern "C" __declspec(dllimport) NTSTATUS ZwQuerySystemInformation(
-//	ULONG InfoClass,
-//	PVOID Buffer,
-//	ULONG Length,
-//	PULONG ReturnLength
-//);
+extern "C" {
+	NTKERNELAPI PVOID NTAPI RtlFindExportsRoutineByName(
+		_In_ PVOID ImageBase,
+		_In_ PCCH RoutineName
+	);
 
-extern "C" NTKERNELAPI PVOID NTAPI RtlFindExportsRoutineByName(
-	_In_ PVOID ImageBase,
-	_In_ PCCH RoutineName
-);
+	NTKERNELAPI PPEB PsGetProcessPeb(
+		_In_ PEPROCESS Process
+	);
 
-extern "C" NTKERNELAPI PPEB PsGetProcessPeb(
-	_In_ PEPROCESS Process
-);
+	NTSTATUS NTAPI MmCopyVirtualMemory(
+		PEPROCESS SourceProcess,
+		PVOID SourceAddress,
+		PEPROCESS TargetProcess,
+		PVOID TargetAddress,
+		SIZE_T BufferSize,
+		KPROCESSOR_MODE PreviousMode,
+		PSIZE_T ReturnSize
+	);
 
-extern "C" NTSTATUS NTAPI MmCopyVirtualMemory(
-	PEPROCESS SourceProcess,
-	PVOID SourceAddress,
-	PEPROCESS TargetProcess,
-	PVOID TargetAddress,
-	SIZE_T BufferSize,
-	KPROCESSOR_MODE PreviousMode,
-	PSIZE_T ReturnSize
-);
-
-extern "C" typedef void (*GenericFuncPtr)();
-
-extern "C"
-{
+	typedef void (*GenericFuncPtr)();
 	typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
+
+	NTSTATUS NTAPI SyscallNtQuerySystemInformation(ULONG SystemInformationClass,
+		PVOID	SystemInformation,
+		ULONG	SystemInformationLength,
+		PULONG	ReturnLength
+	);
 }
 
-void NomadUnload(_In_ PDRIVER_OBJECT DriverObject);
-NTSTATUS NomadCreate(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-NTSTATUS NomadClose(PDEVICE_OBJECT DeviceObject, PIRP Irp);
-NTSTATUS NomadDeviceControl(PDEVICE_OBJECT, _Inout_ PIRP Irp);
-//NTSTATUS DumpKernelModule(_In_ char* moduleName);
-NTSTATUS EnumKernelModuleInfo(ZwQuerySysInfoPtr ZwQuerySysInfo);
-NTSTATUS ImportWinPrimitives(_Out_ GenericFuncPtr pWinPrims[], _In_ wchar_t* names[]);
+namespace NomadDrv {
+	extern "C" GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];
+	//extern "C" GenericFuncPtr(pWinPrims[WINAPI_IMPORT_COUNT]);
+	extern "C" PRTL_PROCESS_MODULES outProcMods;
+	extern "C" ZwQuerySysInfoPtr pZwQuerySysInfo;
+
+	extern "C" {
+		NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
+	}
+
+	NTSTATUS Create(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+	NTSTATUS Close(_In_ PDEVICE_OBJECT DeviceObject, PIRP Irp);
+	NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT, _Inout_ PIRP Irp);
+	void Unload(_In_ PDRIVER_OBJECT DriverObject);
+	//NTSTATUS DumpKernelModule(_In_ char* moduleName);
+}
