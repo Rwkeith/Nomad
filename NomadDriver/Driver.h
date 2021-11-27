@@ -56,13 +56,16 @@ extern "C" {
 
 	typedef void (*GenericFuncPtr)();
 	typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
-
-	NTSTATUS NTAPI SyscallNtQuerySystemInformation(ULONG SystemInformationClass,
-		PVOID	SystemInformation,
-		ULONG	SystemInformationLength,
-		PULONG	ReturnLength
-	);
 }
+
+EXTERN_C NTSTATUS SyscallNtQuerySystemInformation(ULONG SystemInformationClass,
+	PVOID	SystemInformation,
+	ULONG	SystemInformationLength,
+	PULONG	ReturnLength
+);
+
+EXTERN_C void NtQueryWrapper();
+
 
 namespace NomadDrv {
 	extern GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];

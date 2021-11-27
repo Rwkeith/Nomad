@@ -139,6 +139,32 @@ NTSTATUS Utility::ImportWinPrimitives()
     return STATUS_SUCCESS;
 }
 
+/// <summary>
+/// Undocumented method using syscall #
+/// </summary>
+/// <returns></returns>
+
+//extern __declspec(dllimport) unsigned int size;
+EXTERN_C __kernel_entry void NtShutdownSystem();
+
+void Utility::MakeSysCall()
+{
+    //NtQueryWrapper();
+    NtShutdownSystem();
+
+    //SyscallNtQuerySystemInformation(SYSTEM_MODULE_INFORMATION, 0, 0, &size);
+    //ULONG size = NULL;
+    //NTSTATUS status = SyscallNtQuerySystemInformation(SYSTEM_MODULE_INFORMATION, 0, 0, &size);
+    //if (STATUS_INFO_LENGTH_MISMATCH == status) {
+    //    KdPrint(("[NOMAD] [INFO] SyscallNtQuerySystemInformation stub test successed, status: %08x", status));
+    //}
+    //else
+    //{
+    //    KdPrint(("[NOMAD] [ERROR] Unexpected value from SyscallNtQuerySystemInformation stub, status: %08x", status));
+    //    return status;
+    //}
+    //return STATUS_SUCCESS;
+}
 
 // TODO
 /**
