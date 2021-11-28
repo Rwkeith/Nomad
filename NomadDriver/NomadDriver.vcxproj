@@ -185,9 +185,6 @@
     <ClInclude Include="PEHdr.h" />
     <ClInclude Include="Utility.h" />
   </ItemGroup>
-  <ItemGroup>
-    <MASM Include="SysCall.asm" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />

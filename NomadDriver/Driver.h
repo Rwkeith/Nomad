@@ -12,7 +12,39 @@
 #define ZW_QUERY_INFO 0
 #define SYSTEM_MODULE_INFORMATION 0x0B
 
+#define DEBUG
+
+// @jk2
+#ifdef DEBUG
+#define Log(format, ...) DbgPrint("[NOMAD] " format "\n", __VA_ARGS__)
+#define LogInfo(format, ...) DbgPrint("[NOMAD] [INFO] " format "\n", __VA_ARGS__)
+#define LogError(format, ...) DbgPrint("[NOMAD] [ERROR] " format "\n", __VA_ARGS__)
+
+#else
+#define Log(format, ...) 
+#define LogInfo(format, ...) 
+#define LogError(format, ...)
+
+#endif
+
 typedef unsigned long long uint64_t;
+
+typedef struct _LDR_DATA_TABLE_ENTRY
+{
+	LIST_ENTRY InLoadOrderLinks;
+	LIST_ENTRY InMemoryOrderLinks;
+	LIST_ENTRY InInitializationOrderLinks;
+	PVOID DllBase;
+	PVOID EntryPoint;
+	ULONG SizeOfImage;
+	UNICODE_STRING FullDllName;
+	UNICODE_STRING BaseDllName;
+	ULONG Flags;
+	USHORT LoadCount;
+	USHORT TlsIndex;
+	LIST_ENTRY HashLinks;
+	ULONG TimeDateStamp;
+} LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
 
 typedef struct _RTL_PROCESS_MODULE_INFORMATION
 {
@@ -56,13 +88,14 @@ extern "C" {
 
 	typedef void (*GenericFuncPtr)();
 	typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
+	typedef PVOID(*MmSystemRoutinePtr)(PUNICODE_STRING);
 }
 
 namespace NomadDrv {
 	extern GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];
+	extern MmSystemRoutinePtr pMmSysRoutine;
 	extern PRTL_PROCESS_MODULES outProcMods;
 	extern ZwQuerySysInfoPtr pZwQuerySysInfo;
-
 
 	NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
 
