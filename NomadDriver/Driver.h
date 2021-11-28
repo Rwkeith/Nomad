@@ -5,12 +5,12 @@
 #include "PEHdr.h"
 
 #define MAX_NAME_LEN 25
-#define WINAPI_IMPORT_COUNT 1
+
 #define PAGE_SIZE 0x1000
 #define PML4_OFFSET_MASK 0b00000000 11111111 00000000 00000000 00000000 00000000 00000000 00000000
 
 #define ZW_QUERY_INFO 0
-#define SYSTEM_MODULE_INFORMATION 0x0B
+#define SYS_MOD_INF 0x0B
 
 #define DEBUG
 
@@ -27,7 +27,7 @@
 
 #endif
 
-typedef unsigned long long uint64_t;
+typedef unsigned long long uint64_t, _QWORD;
 
 typedef struct _LDR_DATA_TABLE_ENTRY
 {
@@ -89,19 +89,14 @@ extern "C" {
 	typedef void (*GenericFuncPtr)();
 	typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
 	typedef PVOID(*MmSystemRoutinePtr)(PUNICODE_STRING);
+	typedef HANDLE(*PsGetCurrentProcessIdPtr)();
 }
 
 namespace NomadDrv {
-	extern GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];
-	extern MmSystemRoutinePtr pMmSysRoutine;
-	extern PRTL_PROCESS_MODULES outProcMods;
-	extern ZwQuerySysInfoPtr pZwQuerySysInfo;
-
 	NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
 
 	NTSTATUS Create(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
 	NTSTATUS Close(_In_ PDEVICE_OBJECT DeviceObject, PIRP Irp);
 	NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT, _Inout_ PIRP Irp);
 	void Unload(_In_ PDRIVER_OBJECT DriverObject);
-	//NTSTATUS DumpKernelModule(_In_ char* moduleName);
 }

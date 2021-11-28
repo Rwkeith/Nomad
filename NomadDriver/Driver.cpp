@@ -5,12 +5,7 @@
 #include <intrin.h>
 
 namespace NomadDrv {
-    GenericFuncPtr pWinPrims[WINAPI_IMPORT_COUNT];
-    MmSystemRoutinePtr pMmSysRoutine = NULL;
-    ZwQuerySysInfoPtr pZwQuerySysInfo = NULL;
-    PRTL_PROCESS_MODULES outProcMods = NULL;
-    PVOID kernBase = NULL;
-
+    
     NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
     {
         UNREFERENCED_PARAMETER(RegistryPath);
@@ -49,40 +44,7 @@ namespace NomadDrv {
 
         LogInfo("Driver initialized successfully\n");
 
-        kernBase = Utility::GetKernelBaseAddr(DriverObject);
-        if (!kernBase)
-        {
-            LogError("Unable to get kernel base. Aborting init\n");
-            return STATUS_SUCCESS;
-        }
-
-        LogInfo("Frostiest method:  Found ntoskrnl.exe base @ 0x%p\n", kernBase);
-
-        kernBase = Utility::GetNtoskrnlBaseAddress();
-
-        LogInfo("Barakat method: Found ntoskrnl.exe base @ 0x%p\n", kernBase);
-
-        status = Utility::FindExport((uintptr_t)kernBase, "MmGetSystemRoutineAddress", (uintptr_t*)&pMmSysRoutine);
-
-        if (!NT_SUCCESS(status))
-        {
-            LogError("Unable to import core Nt function MmGetSystemRoutineAddress. Aborting init\n");
-            return STATUS_SUCCESS;
-        }
-
-        LogInfo("Parsed export MmGetSystemRoutineAddress: %p\n", pMmSysRoutine);
-        
-        status = Utility::ImportWinPrimitives();
-        if (!NT_SUCCESS(status))
-        {
-            LogError("Unable to Nt* primitives via MmGetSystemRoutineAddress. Aborting init\n");
-            return STATUS_SUCCESS;
-        }
-
-        //Utility::EnumKernelModuleInfo();
-
-        //PsInitialSystemProcess()
-        //EnumSystemThreads((PsInitialSystemProcessPtr))
+        Utility MainUtility(DriverObject);
 
         // All checks complete
         LogInfo("All checks passed.  Nothing suspicious.\n");
@@ -98,11 +60,6 @@ namespace NomadDrv {
         // delete device object
         IoDeleteDevice(DriverObject->DeviceObject);
         LogInfo("Nomad unloaded\n");
-
-        if (outProcMods)
-        {
-            ExFreePool(outProcMods);
-        }
     }
 
     _Use_decl_annotations_

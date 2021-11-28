@@ -1,4 +1,4 @@
-﻿// From winnnth  Use this for redefinition issues.
+﻿// From winnnt.h
 #pragma once
 #define IMAGE_NUMBEROF_DIRECTORY_ENTRIES    16
 #define IMAGE_SIZEOF_SHORT_NAME              8
@@ -90,12 +90,6 @@ typedef struct _IMAGE_OPTIONAL_HEADER64 {
 	DWORD       NumberOfRvaAndSizes;
 	IMAGE_DATA_DIRECTORY DataDirectory[16];
 } IMAGE_OPTIONAL_HEADER64, * PIMAGE_OPTIONAL_HEADER64;
-
-//typedef struct _IMAGE_NT_HEADERS {
-//    DWORD Signature;
-//    IMAGE_FILE_HEADER FileHeader;
-//    IMAGE_OPTIONAL_HEADER32 OptionalHeader;
-//} IMAGE_NT_HEADERS, *PPIMAGE_NT_HEADERS;
 
 typedef struct _IMAGE_NT_HEADERS64 {
 	DWORD Signature;
