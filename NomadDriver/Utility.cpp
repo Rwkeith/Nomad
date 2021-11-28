@@ -145,13 +145,21 @@ NTSTATUS Utility::ImportWinPrimitives()
 
 bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
 {
+    if (!MmIsAddressValid((PVOID)pHead))
+    {
+        LogError("Was unable to read page @ 0x%p", (PVOID)pHead);
+        return FALSE;
+    }
+
     if (!pHead)
     {
+        LogInfo("pHead is null @ 0x%p", (PVOID)pHead);
         return FALSE;
     }
 
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_magic != E_MAGIC)
     {
+        LogInfo("pHead is != 0x%02x", E_MAGIC);
         return FALSE;
     }
 
@@ -160,14 +168,17 @@ bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
     // avoid reading a page not paged in
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_lfanew > 0x1000)
     {
+        LogInfo("pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", (PVOID)pHead);
         return FALSE;
     }
 
     if (ntHeader->Signature != NT_HDR_SIG)
     {
+        LogInfo("ntHeader->Signature != NT_HDR_SIG @ 0x%p", (PVOID)pHead);
         return FALSE;
     }
-
+    
+    LogInfo("SUCCESSFULLY FOUND PAGE @ 0x%p", (PVOID)pHead);
     return TRUE;
 }
 
