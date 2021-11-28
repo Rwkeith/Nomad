@@ -12,6 +12,6 @@ namespace Utility
 
 	PVOID GetNtoskrnlBaseAddress();
 
-	int	_strcmpi_w(_In_ const wchar_t* s1,_In_ const wchar_t* s2);
+	int	strcmpi_w(_In_ const wchar_t* s1,_In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
 }

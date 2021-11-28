@@ -49,7 +49,7 @@ namespace NomadDrv {
 
         LogInfo("Driver initialized successfully\n");
 
-        PVOID kernBase = Utility::GetKernelBaseAddr(DriverObject);
+        kernBase = Utility::GetKernelBaseAddr(DriverObject);
         if (!kernBase)
         {
             LogError("Unable to get kernel base. Aborting init\n");
@@ -79,8 +79,6 @@ namespace NomadDrv {
 
         //Utility::EnumKernelModuleInfo();
 
-        //Utility::
-
         //PsInitialSystemProcess()
         //EnumSystemThreads((PsInitialSystemProcessPtr))
 
@@ -97,7 +95,7 @@ namespace NomadDrv {
 
         // delete device object
         IoDeleteDevice(DriverObject->DeviceObject);
-        KdPrint(("[NOMAD] [INFO] Nomad unloaded\n"));
+        LogInfo("Nomad unloaded\n");
 
         if (outProcMods)
         {
@@ -113,7 +111,7 @@ namespace NomadDrv {
         Irp->IoStatus.Status = STATUS_SUCCESS;
         Irp->IoStatus.Information = 0;
         IoCompleteRequest(Irp, IO_NO_INCREMENT);
-        KdPrint(("[NOMAD] [INFO] Client connection received\n"));
+        LogInfo("Client connection received\n");
         return STATUS_SUCCESS;
     }
 
@@ -125,7 +123,7 @@ namespace NomadDrv {
         Irp->IoStatus.Status = STATUS_SUCCESS;
         Irp->IoStatus.Information = 0;
         IoCompleteRequest(Irp, IO_NO_INCREMENT);
-        KdPrint(("[NOMAD] [INFO] Client closed handle.\n"));
+        LogInfo("Client closed handle.\n");
         return STATUS_SUCCESS;
     }
 
@@ -173,28 +171,6 @@ namespace NomadDrv {
         IoCompleteRequest(Irp, IO_NO_INCREMENT);
         return status;
     }
-
-    /*
-    * WIP to manually parse PTE entries
-    *
-    void ShowPTEData(PVOID VirtAddress)
-    {
-        UINT64 cr3 = __readcr3();
-        KdPrint(("CR3: 0x%08x", cr3));
-
-        // 47 : 39
-        UINT64 PML4_ENTRY = cr3 + ((*(UINT64*)VirtAddress)&&);
-
-    }
-
-    bool IsValidPTE(PVOID VirtAddress)
-    {
-        UINT64 cr3 = __readcr3();
-        // Page-Map Level-4 Table (PML4) (Bits 47-39)
-        UINT64 PML4_ENTRY = cr3 + ((*(UINT64*)VirtAddress) && )
-
-    }
-    */
 
     //NTSTATUS DumpKernelModule(_In_ char* moduleName) {
     //
@@ -299,12 +275,4 @@ namespace NomadDrv {
     //    ExFreePoolWithTag(byteBufferBase, 0x4A4A4A4A);
     //    return STATUS_SUCCESS;
     //}
-
-    /// <summary>
-    /// Uses ZwQuerySysInfo to get legit module ranges
-    /// </summary>
-    /// <param name="ZwQuerySysInfo">pointer to ZwQuerySystemInformation</param>
-    /// <param name="outProcMods">pointer to struct with data out</param>
-    /// <returns>status</returns>
-
 }
