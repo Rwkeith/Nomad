@@ -8,7 +8,7 @@ namespace Utility
 	NTSTATUS EnumSysThreadInfo();
 	bool IsValidPEHeader(_In_ const uintptr_t head);
 	PVOID GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject);
-	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t functionPointer);
+	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer);
 
 	PVOID GetNtoskrnlBaseAddress();
 

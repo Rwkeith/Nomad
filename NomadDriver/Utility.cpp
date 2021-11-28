@@ -11,49 +11,58 @@ namespace Utility
     /// <returns></returns>
     NTSTATUS EnumKernelModuleInfo() {
         ULONG size = NULL;
-        NomadDrv::outProcMods = NULL;
 
         // test our pointer
         if (!NomadDrv::pZwQuerySysInfo)
         {
-            KdPrint(("[NOMAD] [ERROR]pZwQuerySysInf == NULL"));
+            LogError("ZwQuerySystemInformation == NULL");
             return STATUS_UNSUCCESSFUL;
         }
 
         NTSTATUS status = NomadDrv::pZwQuerySysInfo(SYSTEM_MODULE_INFORMATION, 0, 0, &size);
         if (STATUS_INFO_LENGTH_MISMATCH == status) {
-            KdPrint(("[NOMAD] [INFO] ZwQuerySystemInformation test successed, status: %08x", status));
+            LogInfo("ZwQuerySystemInformation test successed, status: %08x", status);
         }
         else
         {
-            KdPrint(("[NOMAD] [ERROR] Unexpected value from ZwQuerySystemInformation, status: %08x", status));
+            LogError("Unexpected value from ZwQuerySystemInformation, status: %08x", status);
             return status;
         }
 
-        NomadDrv::outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePool(NonPagedPool, size);
+        if (NomadDrv::outProcMods)
+        {
+            ExFreePool(NomadDrv::outProcMods);
+            NomadDrv::outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePool(NonPagedPool, size);
+        }
+        else
+        {
+            NomadDrv::outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePool(NonPagedPool, size);
+        }
+        
         if (!NomadDrv::outProcMods) {
-            KdPrint(("[NOMAD] [ERROR] Insufficient memory in the free pool to satisfy the request"));
+            LogError("Insufficient memory in the free pool to satisfy the request");
             return STATUS_UNSUCCESSFUL;
         }
 
         if (!NT_SUCCESS(status = NomadDrv::pZwQuerySysInfo(SYSTEM_MODULE_INFORMATION, NomadDrv::outProcMods, size, 0))) {
-            KdPrint(("[NOMAD] [ERROR] ZwQuerySystemInformation failed"));
+            LogError("ZwQuerySystemInformation failed");
             ExFreePool(NomadDrv::outProcMods);
+            NomadDrv::outProcMods = NULL;
             return status;
         }
 
-        KdPrint(("[NOMAD][INFO] Using ZwQuerySystemInformation with SYSTEM_MODULE_INFORMATION.  Modules->NumberOfModules = %lu\n", NomadDrv::outProcMods->NumberOfModules));
+        KdPrint(("Using ZwQuerySystemInformation with SYSTEM_MODULE_INFORMATION.  Modules->NumberOfModules = %lu\n", NomadDrv::outProcMods->NumberOfModules));
 
         for (ULONG i = 0; i < NomadDrv::outProcMods->NumberOfModules; i++)
         {
-            KdPrint(("[NOMAD] [INFO] Module[%d].FullPathName: %s\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].FullPathName));
-            KdPrint(("[NOMAD] [INFO] Module[%d].ImageBase: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].ImageBase));
-            KdPrint(("[NOMAD] [INFO] Module[%d].MappedBase: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].MappedBase));
-            KdPrint(("[NOMAD] [INFO] Module[%d].LoadCount: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].LoadCount));
-            KdPrint(("[NOMAD] [INFO] Module[%d].ImageSize: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].ImageSize));
+            LogInfo("Module[%d].FullPathName: %s\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].FullPathName);
+            LogInfo("Module[%d].ImageBase: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].ImageBase);
+            LogInfo("Module[%d].MappedBase: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].MappedBase);
+            LogInfo("Module[%d].LoadCount: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].LoadCount);
+            LogInfo("Module[%d].ImageSize: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].ImageSize);
         }
 
-        KdPrint(("[NOMAD][INFO] Using ZwQuerySystemInformation complete\n"));
+        LogInfo("Using ZwQuerySystemInformation complete\n");
         return STATUS_SUCCESS;
     }
 
@@ -65,7 +74,7 @@ namespace Utility
     /// <returns></returns>
     NTSTATUS ImportWinPrimitives()
     {
-        KdPrint(("[NOMAD] [INFO] Importing windows primitives\n"));
+        LogInfo("Importing windows primitives\n");
 
         wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" };
         UNICODE_STRING uniNames[WINAPI_IMPORT_COUNT];
@@ -79,16 +88,15 @@ namespace Utility
 
         for (size_t i = 0; i < WINAPI_IMPORT_COUNT; i++)
         {
-            //pWinPrims[i] = MmGetSystemRoutineAddress(&uniNames[i]);
-            NomadDrv::pWinPrims[i] = (GenericFuncPtr)MmGetSystemRoutineAddress(&uniNames[i]);
+            NomadDrv::pWinPrims[i] = (GenericFuncPtr)NomadDrv::pMmSysRoutine(&uniNames[i]);
             if (NomadDrv::pWinPrims[i] == NULL)
             {
-                KdPrint(("[NOMAD] [ERROR] Failed to import %s\n", (unsigned char*)ansiImportName));
+                LogError("Failed to import %s\n", (unsigned char*)ansiImportName);
                 return STATUS_UNSUCCESSFUL;
             }
             else
             {
-                KdPrint(("[NOMAD] [INFO] Succesfully imported %ls at %p\n", uniNames[i].Buffer, NomadDrv::pWinPrims[i]));
+                LogInfo("Succesfully imported %ls at %p\n", uniNames[i].Buffer, NomadDrv::pWinPrims[i]);
             }
         }
 
@@ -138,7 +146,7 @@ namespace Utility
 
     // @ weak1337
     // https://github.com/weak1337/EvCommunication/blob/cab42dda45a5feb9d2c62f8685d00b0d39fb783e/Driver/Driver/nt.cpp
-    NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t functionPointer)
+    NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer)
     {
         if (!imageBase)
             return STATUS_INVALID_PARAMETER_1;
@@ -147,7 +155,7 @@ namespace Utility
         const auto exportDirectory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(imageBase + ntHeader->OptionalHeader.DataDirectory[0].VirtualAddress);
 
         if (!exportDirectory)
-            STATUS_INVALID_IMAGE_FORMAT;
+            return STATUS_INVALID_IMAGE_FORMAT;
 
         const auto exportedFunctions = reinterpret_cast<DWORD*>(imageBase + exportDirectory->AddressOfFunctions);
         const auto exportedNames = reinterpret_cast<DWORD*>(imageBase + exportDirectory->AddressOfNames);
@@ -156,7 +164,7 @@ namespace Utility
         for (size_t i{}; i < exportDirectory->NumberOfNames; ++i) {
             const auto functionName = reinterpret_cast<const char*>(imageBase + exportedNames[i]);
             if (!strcmp(exportName, functionName)) {
-                functionPointer = imageBase + exportedFunctions[exportedNameOrdinals[i]];
+                *functionPointer = imageBase + exportedFunctions[exportedNameOrdinals[i]];
                 return STATUS_SUCCESS;
             }
         }
@@ -172,7 +180,7 @@ namespace Utility
             return c;
     }
 
-    int strcmpi_w(const wchar_t* s1, const wchar_t* s2)
+    int strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2)
     {
         wchar_t c1, c2;
 
@@ -242,51 +250,9 @@ namespace Utility
     }
 
     // TODO
-    NTSTATUS EnumSysThreadInfo() {
-        ULONG size = NULL;
-        NomadDrv::outProcMods = NULL;
-
-        // test our pointer
-        if (!NomadDrv::pZwQuerySysInfo)
-        {
-            KdPrint(("[NOMAD] [ERROR] ZwQuerySystemInformation == NULL"));
-            return STATUS_UNSUCCESSFUL;
-        }
-
-        NTSTATUS status = NomadDrv::pZwQuerySysInfo(SYSTEM_MODULE_INFORMATION, 0, 0, &size);
-        if (STATUS_INFO_LENGTH_MISMATCH == status) {
-            KdPrint(("[NOMAD] [INFO] ZwQuerySystemInformation test successed, status: %08x", status));
-        }
-        else
-        {
-            KdPrint(("[NOMAD] [ERROR] Unexpected value from ZwQuerySystemInformation, status: %08x", status));
-            return status;
-        }
-
-        NomadDrv::outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePool(NonPagedPool, size);
-        if (!NomadDrv::outProcMods) {
-            KdPrint(("[NOMAD] [ERROR] Insufficient memory in the free pool to satisfy the request"));
-            return STATUS_UNSUCCESSFUL;
-        }
-
-        if (!NT_SUCCESS(status = NomadDrv::pZwQuerySysInfo(SYSTEM_MODULE_INFORMATION, NomadDrv::outProcMods, size, 0))) {
-            KdPrint(("[NOMAD] [ERROR] ZwQuerySystemInformation failed"));
-            ExFreePool(NomadDrv::outProcMods);
-            return status;
-        }
-
-        KdPrint(("[NOMAD][INFO] Using ZwQuerySystemInformation with SYSTEM_MODULE_INFORMATION.  Modules->NumberOfModules = %lu\n", NomadDrv::outProcMods->NumberOfModules));
-
-        for (ULONG i = 0; i < NomadDrv::outProcMods->NumberOfModules; i++)
-        {
-            KdPrint(("[NOMAD] [INFO] Module[%d].FullPathName: %s\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].FullPathName));
-            KdPrint(("[NOMAD] [INFO] Module[%d].ImageBase: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].ImageBase));
-            KdPrint(("[NOMAD] [INFO] Module[%d].MappedBase: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].MappedBase));
-            KdPrint(("[NOMAD] [INFO] Module[%d].LoadCount: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].LoadCount));
-            KdPrint(("[NOMAD] [INFO] Module[%d].ImageSize: %p\n", (int)i, (char*)NomadDrv::outProcMods->Modules[i].ImageSize));
-        }
-
-        KdPrint(("[NOMAD][INFO] Using ZwQuerySystemInformation complete\n"));
+    // also, do xor on strings from Ahora's PoC
+    NTSTATUS EnumSysThreadInfo()
+    {
         return STATUS_SUCCESS;
     }
 

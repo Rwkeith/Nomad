@@ -62,7 +62,7 @@ namespace NomadDrv {
 
         LogInfo("Barakat method: Found ntoskrnl.exe base @ 0x%p\n", kernBase);
 
-        status = Utility::FindExport((uintptr_t)kernBase, "MmGetSystemRoutineAddress", (uintptr_t)pMmSysRoutine);
+        status = Utility::FindExport((uintptr_t)kernBase, "MmGetSystemRoutineAddress", (uintptr_t*)&pMmSysRoutine);
 
         if (!NT_SUCCESS(status))
         {
@@ -70,6 +70,8 @@ namespace NomadDrv {
             return STATUS_SUCCESS;
         }
 
+        LogInfo("Parsed export MmGetSystemRoutineAddress: %p\n", pMmSysRoutine);
+        
         status = Utility::ImportWinPrimitives();
         if (!NT_SUCCESS(status))
         {
