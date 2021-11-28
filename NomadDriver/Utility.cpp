@@ -24,7 +24,7 @@ Utility::~Utility()
     }
 }
 
-NTSTATUS Utility::InitUtils(PDRIVER_OBJECT DriverObject)
+NTSTATUS Utility::InitUtils(_In_ PDRIVER_OBJECT DriverObject)
 {
     NTSTATUS status;
 
@@ -51,7 +51,7 @@ NTSTATUS Utility::InitUtils(PDRIVER_OBJECT DriverObject)
 
     LogInfo("Parsed export MmGetSystemRoutineAddress: %p\n", pMmSysRoutine);
 
-    status = ImportWinPrimitives();
+    status = ImportNtPrimitives();
     if (!NT_SUCCESS(status))
     {
         LogError("Unable to Nt* primitives via MmGetSystemRoutineAddress. Aborting init\n");
@@ -64,23 +64,17 @@ NTSTATUS Utility::InitUtils(PDRIVER_OBJECT DriverObject)
 /// Uses a pointer to ZwQuerySystemInformation to enumerate all loaded modules
 /// </summary>
 /// <returns></returns>
-NTSTATUS Utility::EnumKernelModuleInfo() {
+NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
+{
     ULONG size = NULL;
-
-    // test our pointer
-    if (!pZwQuerySysInfo)
-    {
-        LogError("ZwQuerySystemInformation == NULL");
-        return STATUS_UNSUCCESSFUL;
-    }
 
     NTSTATUS status = pZwQuerySysInfo(SYS_MOD_INF, 0, 0, &size);
     if (STATUS_INFO_LENGTH_MISMATCH == status) {
-        LogInfo("ZwQuerySystemInformation test successed, status: %08x", status);
+        LogInfo("ZwQuerySystemInformation data struct size retrieved");
     }
     else
     {
-        LogError("Unexpected value from ZwQuerySystemInformation, status: %08x", status);
+        LogError("ZwQuerySystemInformation, status: %08x", status);
         return status;
     }
 
@@ -106,32 +100,37 @@ NTSTATUS Utility::EnumKernelModuleInfo() {
         return status;
     }
 
-    LogInfo("Using ZwQuerySystemInformation with SYS_MOD_INF.  Modules->NumberOfModules = %lu\n", outProcMods->NumberOfModules);
-
-    for (ULONG i = 0; i < outProcMods->NumberOfModules; i++)
+    if (procMods != NULL)
     {
-        LogInfo("Module[%d].FullPathName: %s\n", (int)i, (char*)outProcMods->Modules[i].FullPathName);
-        LogInfo("Module[%d].ImageBase: %p\n", (int)i, (char*)outProcMods->Modules[i].ImageBase);
-        LogInfo("Module[%d].MappedBase: %p\n", (int)i, (char*)outProcMods->Modules[i].MappedBase);
-        LogInfo("Module[%d].LoadCount: %p\n", (int)i, (char*)outProcMods->Modules[i].LoadCount);
-        LogInfo("Module[%d].ImageSize: %p\n", (int)i, (char*)outProcMods->Modules[i].ImageSize);
+        *procMods = outProcMods;
     }
 
-    LogInfo("Using ZwQuerySystemInformation complete\n");
+#ifdef VERBOSE_LOG
+    LogInfo("\tModules->NumberOfModules = %lu\n", outProcMods->NumberOfModules);
+    for (ULONG i = 0; i < outProcMods->NumberOfModules; i++)
+    {
+        LogInfo("\tModule[%d].FullPathName: %s\n", (int)i, (char*)outProcMods->Modules[i].FullPathName);
+        LogInfo("\tModule[%d].ImageBase: %p\n", (int)i, (char*)outProcMods->Modules[i].ImageBase);
+        LogInfo("\tModule[%d].MappedBase: %p\n", (int)i, (char*)outProcMods->Modules[i].MappedBase);
+        LogInfo("\tModule[%d].LoadCount: %p\n", (int)i, (char*)outProcMods->Modules[i].LoadCount);
+        LogInfo("\tModule[%d].ImageSize: %p\n", (int)i, (char*)outProcMods->Modules[i].ImageSize);
+    }
+    LogInfo("EnumKernelModuleInfo() complete\n");
+#endif
     return STATUS_SUCCESS;
 }
 
 /// <summary>
 /// Dynamic importing via a documented method
 /// </summary>
-/// <param name="pWinPrims"></param>
+/// <param name="pNtPrimitives"></param>
 /// <param name="names"></param>
 /// <returns></returns>
-NTSTATUS Utility::ImportWinPrimitives()
+NTSTATUS Utility::ImportNtPrimitives()
 {
     LogInfo("Importing windows primitives\n");
 
-    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" };
+    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" , L"PsGetCurrentProcessId", L"PsIsSystemThread", L"PsGetCurrentProcess" };
     UNICODE_STRING uniNames[WINAPI_IMPORT_COUNT];
 
     for (size_t i = 0; i < WINAPI_IMPORT_COUNT; i++)
@@ -143,19 +142,23 @@ NTSTATUS Utility::ImportWinPrimitives()
 
     for (size_t i = 0; i < WINAPI_IMPORT_COUNT; i++)
     {
-        pWinPrims[i] = (GenericFuncPtr)pMmSysRoutine(&uniNames[i]);
-        if (pWinPrims[i] == NULL)
+        pNtPrimitives[i] = (GenericFuncPtr)pMmSysRoutine(&uniNames[i]);
+        if (pNtPrimitives[i] == NULL)
         {
             LogError("Failed to import %s\n", (unsigned char*)ansiImportName);
             return STATUS_UNSUCCESSFUL;
         }
         else
         {
-            LogInfo("Succesfully imported %ls at %p\n", uniNames[i].Buffer, pWinPrims[i]);
+            LogInfo("Succesfully imported %ls at %p\n", uniNames[i].Buffer, pNtPrimitives[i]);
         }
     }
 
-    pZwQuerySysInfo = (ZwQuerySysInfoPtr)pWinPrims[ZW_QUERY_INFO];
+    pZwQuerySysInfo = (ZwQuerySysInfoPtr)pNtPrimitives[_ZwQuerySystemInformationIDX];
+    pPsGetCurrentProcessId = (PsGetCurrentProcessIdPtr)pNtPrimitives[_PsGetCurrentProcessIdIDX];
+    pPsIsSystemThread = (PsIsSystemThreadPtr)pNtPrimitives[_PsIsSystemThreadIDX];
+    pPsGetCurrentProcess = (PsGetCurrentProcessPtr)pNtPrimitives[_PsGetCurrentProcessIDX];
+
 
     return STATUS_SUCCESS;
 }
@@ -165,19 +168,25 @@ bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
     // ideally should parse the PT so this can't be IAT spoofed
     if (!MmIsAddressValid((PVOID)pHead))
     {
+#ifdef VERBOSE_LOG
         LogError("Was unable to read page @ 0x%p", (PVOID)pHead);
+#endif
         return FALSE;
     }
 
     if (!pHead)
     {
+#ifdef VERBOSE_LOG
         LogInfo("pHead is null @ 0x%p", (PVOID)pHead);
+#endif
         return FALSE;
     }
 
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_magic != E_MAGIC)
     {
+#ifdef VERBOSE_LOG
         LogInfo("pHead is != 0x%02x @ %p", E_MAGIC, (PVOID)pHead);
+#endif
         return FALSE;
     }
 
@@ -186,17 +195,21 @@ bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
     // avoid reading a page not paged in
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_lfanew > 0x1000)
     {
+#ifdef VERBOSE_LOG
         LogInfo("pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", (PVOID)pHead);
+#endif
         return FALSE;
     }
 
     if (ntHeader->Signature != NT_HDR_SIG)
     {
+#ifdef VERBOSE_LOG
         LogInfo("ntHeader->Signature != 0x%02x @ 0x%p", NT_HDR_SIG, (PVOID)pHead);
+#endif
         return FALSE;
     }
 
-    LogInfo("SUCCESSFULLY FOUND PAGE @ 0x%p", (PVOID)pHead);
+    LogInfo("Found valid PE header @ 0x%p", (PVOID)pHead);
     return TRUE;
 }
 
@@ -275,7 +288,7 @@ PVOID Utility::GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject)
 
 // @ Barakat , GS Register, reverse page walk until MZ header of ntos
 // https://gist.github.com/Barakat/34e9924217ed81fd78c9c92d746ec9c6
-// Lands above nt module, but memory could be paged out.  Tweak to check PTE's instead of using MmIsAddressValid.  Refer to:  https://www.unknowncheats.me/forum/anti-cheat-bypass/437451-whats-proper-write-read-physical-memory.html
+// Lands above nt module, but can page fault! Tweak to check PTE's instead of using MmIsAddressValid.  Refer to:  https://www.unknowncheats.me/forum/anti-cheat-bypass/437451-whats-proper-write-read-physical-memory.html
 PVOID Utility::GetNtoskrnlBaseAddress()
 {
 #pragma pack(push, 1)
@@ -305,279 +318,342 @@ PVOID Utility::GetNtoskrnlBaseAddress()
     return reinterpret_cast<void*>(pageInNtoskrnl);
 }
 
-    //__int64 ScanSystemThreads()
-    //{
-    //    __int64 result;
-    //    __int64 currentProcessId;
-    //    int isSystemThread;
-    //    __int64 systemBigPoolInformation;
-    //    PRTL_PROCESS_MODULE_INFORMATION systemModuleInformation;
-    //    CONTEXT* context;
-    //    unsigned __int64 currentThreadId;
-    //    signed int status0;
-    //    STACKWALK_ENTRY* entry;
-    //    __int64 v10;
-    //    int entryIndex;
-    //    __int64 v12;
-    //    unsigned __int64 v13;
-    //    int status1;
-    //    __int64 threadProcessId;
-    //    STACKWALK_BUFFER stackwalkBuffer;
-    //    PVOID threadObject;
-    //    __int64 win32StartAddress;
+//wrapper for ZwQuerySysInfo
+// for now we want PSYSTEM_BIGPOOL_INFORMATION
+NTSTATUS Utility::QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* dataBuf) /*, 0x100000, 0x2000000) <- ?? */
+{
+    if (!dataBuf)
+    {
+        LogError("QuerySystemInformation(), dataBuf == NULL");
+        return STATUS_UNSUCCESSFUL;
+    }
 
-    //    result = (long long)NomadDrv::pPsGetCurrentProcessId();
-    //    currentProcessId = result;
-    //    if (import_PsIsSystemThread)
-    //    {
-    //        result = import_PsIsSystemThread(__readgsqword(0x188u));
-    //        isSystemThread = (unsigned __int8)result;
-    //    }
-    //    else
-    //    {
-    //        isSystemThread = 0;
-    //    }
-    //    if (isSystemThread)
-    //    {
-    //        result = import_PsGetCurrentProcess();
-    //        if (result == PsInitialSystemProcess)
-    //        {
-    //            systemBigPoolInformation = QuerySystemInformation(0x42i64, 0x100000i64, 0x2000000i64);
-    //            result = QuerySystemModuleInformation();
-    //            systemModuleInformation = (PRTL_PROCESS_MODULE_INFORMATION)result;
-    //            EnumKernelModuleInfo();
-    //            if (result)
-    //            {
-    //                context = (CONTEXT*)AllocatePool(0x4D0i64);
-    //                if (context)
-    //                {
-    //                    currentThreadId = 4i64;
-    //                    do
-    //                    {
-    //                        if (import_PsLookupThreadByThreadId)
-    //                            status0 = import_PsLookupThreadByThreadId(currentThreadId, &threadObject);
-    //                        else
-    //                            status0 = 0xC0000002;
-    //                        if (status0 >= 0)
-    //                        {
-    //                            if (GetProcessId((__int64)threadObject) == currentProcessId
-    //                                && threadObject != (PVOID)__readgsqword(0x188u)
-    //                                && StackwalkThread((__int64)threadObject, context, &stackwalkBuffer)
-    //                                && stackwalkBuffer.EntryCount > 0u)
-    //                            {
-    //                                entry = stackwalkBuffer.Entries;
-    //                                while (1)
-    //                                {
-    //                                    if (!GetModuleEntryForAddress(entry->RipValue, &systemModuleInformation->Count))
-    //                                    {
-    //                                        if (!v10)
-    //                                            break;
-    //                                        if (!v12)
-    //                                            break;
-    //                                        v13 = *(_QWORD*)(v12 + 24);
-    //                                        if (!v13
-    //                                            || *(_DWORD*)(v12 + 32) <= 0u
-    //                                            || entry->RipValue < v13
-    //                                            || entry->RipValue >= v13 + *(unsigned int*)(v12 + 32))
-    //                                        {
-    //                                            break;
-    //                                        }
-    //                                    }
-    //                                    ++entry;
-    //                                    if ((unsigned int)(entryIndex + 1) >= stackwalkBuffer.EntryCount)
-    //                                        goto LABEL_30;
-    //                                }
-    //                                status1 = QueryWin32StartAddress((__int64)threadObject, &win32StartAddress);
-    //                                if (status1 < 0)
-    //                                    win32StartAddress = 0i64;
-    //                                threadProcessId = GetProcessId((__int64)threadObject);
-    //                                PerformAdditionalScans(         // This is virtualized.
-    //                                                                // Probably checks if address is within any big pool and sends report to server.
-    //                                    threadProcessId,
-    //                                    (unsigned int)currentThreadId,
-    //                                    win32StartAddress,
-    //                                    systemModuleInformation,
-    //                                    systemBigPoolInformation,
-    //                                    &stackwalkBuffer);
-    //                            }
-    //                        LABEL_30:
-    //                            ObfDereferenceObject(threadObject);
-    //                        }
-    //                        currentThreadId += 4i64;
-    //                    } while (currentThreadId < 0x3000);
-    //                    FreePool((__int64)context);
-    //                }
-    //                result = FreePool((__int64)systemModuleInformation);
-    //            }
-    //            if (systemBigPoolInformation)
-    //                result = FreePool(systemBigPoolInformation);
-    //        }
-    //    }
-    //    return result;
-    //}
+    ULONG size = NULL;
+    NTSTATUS status = pZwQuerySysInfo(infoClass, 0, 0, &size);
+    if (STATUS_INFO_LENGTH_MISMATCH == status) {
+        LogInfo("\tZwQuerySystemInformation data struct size retrieved");
+    }
+    else
+    {
+        LogError("\tZwQuerySystemInformation, status: %08x", status);
+        return status;
+    }
 
-    //char __fastcall StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_BUFFER* stackwalkBuffer)
-    //{
-    //    char status; // di
-    //    _QWORD* stackBuffer; // rax MAPDST
-    //    size_t copiedSize; // rax
-    //    DWORD64 startRip; // rdx
-    //    unsigned int index; // ebp
-    //    unsigned __int64 rip0; // rcx
-    //    DWORD64 rsp0; // rdx
-    //    __int64 functionTableEntry; // rax
-    //    __int64 moduleBase; // [rsp+40h] [rbp-48h]
-    //    __int64 v17; // [rsp+48h] [rbp-40h]
-    //    __int64 v18; // [rsp+50h] [rbp-38h]
-    //    unsigned __int64 sectionVa; // [rsp+90h] [rbp+8h]
-    //    __int64 sectionSize; // [rsp+A8h] [rbp+20h]
+    *dataBuf = ExAllocatePool(NonPagedPool, size);
 
-    //    status = 0;
-    //    if (!threadObject)
-    //        return 0;
-    //    if (!stackwalkBuffer)
-    //        return 0;
-    //    memset(context, 0, 0x4D0ui64);
-    //    memset(stackwalkBuffer, 0, 0x208ui64);
-    //    if (!import_RtlVirtualUnwind)
-    //    {
-    //        import_RtlVirtualUnwind = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_47420);
-    //        if (!import_RtlVirtualUnwind)
-    //            return 0;
-    //    }
-    //    if (!import_RtlLookupFunctionEntry)
-    //    {
-    //        import_RtlLookupFunctionEntry = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_473F0);
-    //        if (!import_RtlLookupFunctionEntry)
-    //            return 0;
-    //    }
-    //    stackBuffer = (_QWORD*)AllocatePool(4096i64);
-    //    if (stackBuffer)
-    //    {
-    //        copiedSize = CopyThreadKernelStack(threadObject, 4096i64, stackBuffer, 4096);
-    //        if (copiedSize)
-    //        {
-    //            if (copiedSize != 4096 && copiedSize >= 0x48)
-    //            {
-    //                if (GetNtoskrnlSection('txet.', &sectionVa, &sectionSize))
-    //                {
-    //                    startRip = stackBuffer[7];
-    //                    if (startRip >= sectionVa && startRip < sectionSize + sectionVa)
-    //                    {
-    //                        status = 1;
-    //                        context->Rip = startRip;
-    //                        context->Rsp = (DWORD64)(stackBuffer + 8);
-    //                        index = 0;
-    //                        do
-    //                        {
-    //                            rip0 = context->Rip;
-    //                            rsp0 = context->Rsp;
-    //                            stackwalkBuffer->Entries[stackwalkBuffer->EntryCount].RipValue = rip0;
-    //                            stackwalkBuffer->Entries[stackwalkBuffer->EntryCount++].RspValue = rsp0;
-    //                            if (rip0 < MmSystemRangeStart)
-    //                                break;
-    //                            if (rsp0 < MmSystemRangeStart)
-    //                                break;
-    //                            functionTableEntry = import_RtlLookupFunctionEntry(rip0, &moduleBase, 0i64);
-    //                            if (!functionTableEntry)
-    //                                break;
-    //                            import_RtlVirtualUnwind(0i64, moduleBase, context->Rip, functionTableEntry, context, &v18, &v17, 0i64);
-    //                            if (!context->Rip)
-    //                            {
-    //                                stackwalkBuffer->Succeded = 1;
-    //                                break;
-    //                            }
-    //                            ++index;
-    //                        } while (index < 0x20);
-    //                    }
-    //                }
-    //            }
-    //        }
-    //        FinalizeFreePool((__int64)stackBuffer);
-    //    }
-    //    return status;
-    //}
+    if (!*dataBuf) {
+        LogError("\tInsufficient memory in the free pool to satisfy the request");
+        return STATUS_UNSUCCESSFUL;
+    }
 
-    //size_t __usercall CopyThreadKernelStack@<rax>(__int64 threadObject@<rcx>, __int64 maxSize@<rdx>, void* outStackBuffer@<r8>, signed int a4@<r14d>)
-    //{
-    //    size_t copiedSize; // rsi
-    //    __int64 threadStateOffset; // r12 MAPDST
-    //    __int64 kernelStackOffset; // r14
-    //    unsigned int threadStackBaseOffset; // eax
-    //    unsigned __int64 threadStackBase; // rdi
-    //    unsigned int threadStackLimitOffset; // eax
-    //    unsigned __int64 threadStackLimit; // rbp
-    //    int isSystemThread; // er11
-    //    const void** pKernelStack; // r12
-    //    __int64 v16; // rdx
-    //    unsigned int threadLockOffset; // eax
-    //    KSPIN_LOCK* threadLock; // rcx
-    //    void(__fastcall * v19)(_QWORD, __int64); // rax
-    //    unsigned __int8 oldIrql; // [rsp+50h] [rbp+8h]
+    if (!NT_SUCCESS(status = pZwQuerySysInfo(infoClass, *dataBuf, size, 0))) {
+        LogError("\tZwQuerySystemInformation failed");
+        ExFreePool(*dataBuf);
+        outProcMods = NULL;
+        return status;
+    }
 
-    //    copiedSize = 0i64;
-    //    threadStateOffset = (unsigned int)GetThreadStateOffset(a4);
-    //    kernelStackOffset = (unsigned int)GetKernelStackOffset();
-    //    threadStackBaseOffset = GetThreadStackBaseOffset();
-    //    if (threadObject && threadStackBaseOffset)
-    //        threadStackBase = *(_QWORD*)(threadStackBaseOffset + threadObject);
-    //    else
-    //        threadStackBase = 0i64;
-    //    threadStackLimitOffset = GetThreadStackLimitOffset();
-    //    if (!threadObject)
-    //        return 0i64;
-    //    threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + threadObject) : 0i64;
-    //    isSystemThread = import_PsIsSystemThread ? (unsigned __int8)import_PsIsSystemThread(threadObject) : 0;
-    //    if (!isSystemThread
-    //        || !outStackBuffer
-    //        || !(_DWORD)threadStateOffset
-    //        || !(_DWORD)kernelStackOffset
-    //        || !threadStackBase
-    //        || !threadStackLimit
-    //        || KeGetCurrentIrql() > 1u
-    //        || threadObject == __readgsqword(0x188u))
-    //    {
-    //        return 0i64;
-    //    }
-    //    pKernelStack = (const void**)(threadObject + kernelStackOffset);
-    //    memset(outStackBuffer, 0, 0x1000ui64);
-    //    if (LockThread(&oldIrql, threadObject, 0x1000))
-    //    {
-    //        if (!(unsigned __int8)PsIsThreadTerminating(threadObject)
-    //            && *(_BYTE*)(threadStateOffset + threadObject) == 5
-    //            && (unsigned __int64)*pKernelStack > threadStackLimit
-    //            && (unsigned __int64)*pKernelStack < threadStackBase
-    //            && MmGetPhysicalAddress(*pKernelStack))
-    //        {
-    //            copiedSize = threadStackBase - (_QWORD)*pKernelStack;
-    //            if (copiedSize > 0x1000)
-    //                copiedSize = 0x1000i64;
-    //            memmove(outStackBuffer, *pKernelStack, copiedSize);
-    //        }
-    //        if (MEMORY[0xFFFFF7800000026C] >= 6u && (MEMORY[0xFFFFF7800000026C] != 6 || MEMORY[0xFFFFF78000000270]))
-    //        {
-    //            threadLockOffset = GetThreadLockOffset(0x1000);
-    //            threadLock = (KSPIN_LOCK*)((threadObject + threadLockOffset) & -(signed __int64)(threadLockOffset != 0));
-    //            if (threadLock)
-    //            {
-    //                KeReleaseSpinLockFromDpcLevel(threadLock);
-    //                __writecr8(oldIrql);
-    //            }
-    //        }
-    //        else
-    //        {
-    //            v19 = (void(__fastcall*)(_QWORD, __int64))qword_4DF00;
-    //            if (qword_4DF00
-    //                || (v19 = (void(__fastcall*)(_QWORD, __int64))FindExport((__int64)&unk_46D00),
-    //                    (qword_4DF00 = (__int64)v19) != 0))
-    //            {
-    //                LOBYTE(v16) = oldIrql;
-    //                v19(0i64, v16);
-    //            }
-    //        }
-    //    }
-    //    return copiedSize;
-    //}
+    LogInfo("\tQuerySystemInformation() succeeded.\n");
+    return STATUS_SUCCESS;
+}
+
+/// EAC's System thread scanning method
+// https://www.unknowncheats.me/forum/anti-cheat-bypass/325212-eac-system-thread-detection.html
+NTSTATUS Utility::ScanSystemThreads()
+{
+    __int64 result;
+    __int64 currentProcessId;
+    int isSystemThread;
+    PVOID systemBigPoolInformation;
+    PSYSTEM_MODULE_INFORMATION systemModuleInformation;
+    CONTEXT* context;
+    UINT64 currentThreadId;
+    signed int status0;
+    STACKWALK_ENTRY* entry;
+    __int64 v10;
+    int entryIndex;
+    __int64 v12;
+    unsigned __int64 v13;
+    int status1;
+    __int64 threadProcessId;
+    STACKWALK_BUFFER stackwalkBuffer;
+    PETHREAD threadObject;
+    __int64 win32StartAddress;
+
+    LogInfo("ScanSystemThreads(), Starting routine\n");
+    result = (long long)pPsGetCurrentProcessId();
+    LogInfo("\tpPsGetCurrentProcessId() returned %p\n", result);
+    currentProcessId = result;
+    if (pPsIsSystemThread)
+    {
+        result = pPsIsSystemThread((PETHREAD)__readgsqword(0x188u));
+        LogInfo("\tpPsIsSystemThread() returned %p\n", result);
+        isSystemThread = (unsigned __int8)result;
+    }
+    else
+    {
+        isSystemThread = 0;
+    }
+    if (isSystemThread)
+    {
+        result = (long long)pPsGetCurrentProcess();
+        LogInfo("\tpPsGetCurrentProcess() returned %p\n", result);
+        if ((PEPROCESS)result == PsInitialSystemProcess)  // PsInitialSystemProcess is global from ntkrnl
+        {
+            // Get system big pool info
+            if (!NT_SUCCESS(result = QuerySystemInformation(SystemBigPoolInformation, &systemBigPoolInformation)))
+            {
+                LogError("\tQuerySystemInformation(SystemBigPoolInformation) was unsuccessful 0x%08x\n", result);
+                return result;
+            }
+
+            // System != Process module info
+            if (!NT_SUCCESS(result = QuerySystemInformation(SystemModuleInformation, (PVOID*)&result)))
+            {
+                LogError("\tQuerySystemInformation(SystemModuleInformation) was unsuccessful 0x%08x\n", result);
+                return result;
+            }
+
+            systemModuleInformation = (PSYSTEM_MODULE_INFORMATION)result;
+            
+            if (systemModuleInformation)
+            {
+                // allocate memory to store a thread's context
+                context = (CONTEXT*)ExAllocatePool(NonPagedPool, sizeof(CONTEXT));
+                if (context)
+                {
+                    currentThreadId = 4;
+                    do
+                    {
+                        if (pPsLookupThreadByThreadId)
+                            status0 = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
+                        else
+                            status0 = 0xC0000002;
+
+                        if (status0 >= 0)
+                        {
+                            if (GetProcessId((__int64)threadObject) == currentProcessId
+                                && threadObject != (PVOID)__readgsqword(0x188u)
+                                && StackwalkThread((__int64)threadObject, context, &stackwalkBuffer)
+                                && stackwalkBuffer.EntryCount > 0u)
+                            {
+                                entry = stackwalkBuffer.Entries;
+                                while (1)
+                                {
+                                    if (!GetModuleEntryForAddress(entry->RipValue, &systemModuleInformation->Count))
+                                    {
+                                        if (!v10)
+                                            break;
+                                        if (!v12)
+                                            break;
+                                        v13 = *(_QWORD*)(v12 + 24);
+                                        if (!v13
+                                            || *(_DWORD*)(v12 + 32) <= 0u
+                                            || entry->RipValue < v13
+                                            || entry->RipValue >= v13 + *(unsigned int*)(v12 + 32))
+                                        {
+                                            break;
+                                        }
+                                    }
+                                    ++entry;
+                                    if ((unsigned int)(entryIndex + 1) >= stackwalkBuffer.EntryCount)
+                                        goto LABEL_30;
+                                }
+                                status1 = QueryWin32StartAddress((__int64)threadObject, &win32StartAddress);
+                                if (status1 < 0)
+                                    win32StartAddress = 0i64;
+                                threadProcessId = GetProcessId((__int64)threadObject);
+                                PerformAdditionalScans(         // This is virtualized.
+                                                                // Probably checks if address is within any big pool and sends report to server.
+                                    threadProcessId,
+                                    (unsigned int)currentThreadId,
+                                    win32StartAddress,
+                                    systemModuleInformation,
+                                    systemBigPoolInformation,
+                                    &stackwalkBuffer);
+                            }
+                        LABEL_30:
+                            ObfDereferenceObject(threadObject);
+                        }
+                        currentThreadId += 4;    // thread id's are multiple of 4
+                    } while (currentThreadId < 0x3000);     // lol, brute force method by EAC.  Maybe there's a better way
+                    ExFreePool(context);
+                }
+                else
+                {
+                    LogError("\tUtility.cpp:418, ExAllocatePool failed\n");
+                }
+                ExFreePool(systemModuleInformation);
+            }
+            if (systemBigPoolInformation)
+                ExFreePool(systemBigPoolInformation);
+        }
+    }
+    return result;
+}
+
+char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_BUFFER* stackwalkBuffer)
+{
+    char status; // di
+    _QWORD* stackBuffer; // rax MAPDST
+    size_t copiedSize; // rax
+    DWORD64 startRip; // rdx
+    unsigned int index; // ebp
+    unsigned __int64 rip0; // rcx
+    DWORD64 rsp0; // rdx
+    __int64 functionTableEntry; // rax
+    __int64 moduleBase; // [rsp+40h] [rbp-48h]
+    __int64 v17; // [rsp+48h] [rbp-40h]
+    __int64 v18; // [rsp+50h] [rbp-38h]
+    unsigned __int64 sectionVa; // [rsp+90h] [rbp+8h]
+    __int64 sectionSize; // [rsp+A8h] [rbp+20h]
+
+    status = 0;
+    if (!threadObject)
+        return 0;
+    if (!stackwalkBuffer)
+        return 0;
+    memset(context, 0, 0x4D0ui64);
+    memset(stackwalkBuffer, 0, 0x208ui64);
+    if (!import_RtlVirtualUnwind)
+    {
+        import_RtlVirtualUnwind = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_47420);
+        if (!import_RtlVirtualUnwind)
+            return 0;
+    }
+    if (!import_RtlLookupFunctionEntry)
+    {
+        import_RtlLookupFunctionEntry = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_473F0);
+        if (!import_RtlLookupFunctionEntry)
+            return 0;
+    }
+    stackBuffer = (_QWORD*)AllocatePool(4096i64);
+    if (stackBuffer)
+    {
+        copiedSize = CopyThreadKernelStack(threadObject, 4096i64, stackBuffer, 4096);
+        if (copiedSize)
+        {
+            if (copiedSize != 4096 && copiedSize >= 0x48)
+            {
+                if (GetNtoskrnlSection('txet.', &sectionVa, &sectionSize))
+                {
+                    startRip = stackBuffer[7];
+                    if (startRip >= sectionVa && startRip < sectionSize + sectionVa)
+                    {
+                        status = 1;
+                        context->Rip = startRip;
+                        context->Rsp = (DWORD64)(stackBuffer + 8);
+                        index = 0;
+                        do
+                        {
+                            rip0 = context->Rip;
+                            rsp0 = context->Rsp;
+                            stackwalkBuffer->Entries[stackwalkBuffer->EntryCount].RipValue = rip0;
+                            stackwalkBuffer->Entries[stackwalkBuffer->EntryCount++].RspValue = rsp0;
+                            if (rip0 < MmSystemRangeStart)
+                                break;
+                            if (rsp0 < MmSystemRangeStart)
+                                break;
+                            functionTableEntry = import_RtlLookupFunctionEntry(rip0, &moduleBase, 0i64);
+                            if (!functionTableEntry)
+                                break;
+                            import_RtlVirtualUnwind(0i64, moduleBase, context->Rip, functionTableEntry, context, &v18, &v17, 0i64);
+                            if (!context->Rip)
+                            {
+                                stackwalkBuffer->Succeded = 1;
+                                break;
+                            }
+                            ++index;
+                        } while (index < 0x20);
+                    }
+                }
+            }
+        }
+        FinalizeFreePool((__int64)stackBuffer);
+    }
+    return status;
+}
+
+size_t Utility::CopyThreadKernelStack(__int64 threadObject, __int64 maxSize, void* outStackBuffer, signed int a4)
+{
+    size_t copiedSize; // rsi
+    __int64 threadStateOffset; // r12 MAPDST
+    __int64 kernelStackOffset; // r14
+    unsigned int threadStackBaseOffset; // eax
+    unsigned __int64 threadStackBase; // rdi
+    unsigned int threadStackLimitOffset; // eax
+    unsigned __int64 threadStackLimit; // rbp
+    int isSystemThread; // er11
+    const void** pKernelStack; // r12
+    __int64 v16; // rdx
+    unsigned int threadLockOffset; // eax
+    KSPIN_LOCK* threadLock; // rcx
+    void(__fastcall * v19)(_QWORD, __int64); // rax
+    unsigned __int8 oldIrql; // [rsp+50h] [rbp+8h]
+
+    copiedSize = 0i64;
+    threadStateOffset = (unsigned int)GetThreadStateOffset(a4);
+    kernelStackOffset = (unsigned int)GetKernelStackOffset();
+    threadStackBaseOffset = GetThreadStackBaseOffset();
+    if (threadObject && threadStackBaseOffset)
+        threadStackBase = *(_QWORD*)(threadStackBaseOffset + threadObject);
+    else
+        threadStackBase = 0i64;
+    threadStackLimitOffset = GetThreadStackLimitOffset();
+    if (!threadObject)
+        return 0i64;
+    threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + threadObject) : 0i64;
+    isSystemThread = import_PsIsSystemThread ? (unsigned __int8)import_PsIsSystemThread(threadObject) : 0;
+    if (!isSystemThread
+        || !outStackBuffer
+        || !(_DWORD)threadStateOffset
+        || !(_DWORD)kernelStackOffset
+        || !threadStackBase
+        || !threadStackLimit
+        || KeGetCurrentIrql() > 1u
+        || threadObject == __readgsqword(0x188u))
+    {
+        return 0i64;
+    }
+    pKernelStack = (const void**)(threadObject + kernelStackOffset);
+    memset(outStackBuffer, 0, 0x1000ui64);
+    if (LockThread(&oldIrql, threadObject, 0x1000))
+    {
+        if (!(unsigned __int8)PsIsThreadTerminating(threadObject)
+            && *(_BYTE*)(threadStateOffset + threadObject) == 5
+            && (unsigned __int64)*pKernelStack > threadStackLimit
+            && (unsigned __int64)*pKernelStack < threadStackBase
+            && MmGetPhysicalAddress(*pKernelStack))
+        {
+            copiedSize = threadStackBase - (_QWORD)*pKernelStack;
+            if (copiedSize > 0x1000)
+                copiedSize = 0x1000i64;
+            memmove(outStackBuffer, *pKernelStack, copiedSize);
+        }
+        if (MEMORY[0xFFFFF7800000026C] >= 6u && (MEMORY[0xFFFFF7800000026C] != 6 || MEMORY[0xFFFFF78000000270]))
+        {
+            threadLockOffset = GetThreadLockOffset(0x1000);
+            threadLock = (KSPIN_LOCK*)((threadObject + threadLockOffset) & -(signed __int64)(threadLockOffset != 0));
+            if (threadLock)
+            {
+                KeReleaseSpinLockFromDpcLevel(threadLock);
+                __writecr8(oldIrql);
+            }
+        }
+        else
+        {
+            v19 = (void(__fastcall*)(_QWORD, __int64))qword_4DF00;
+            if (qword_4DF00
+                || (v19 = (void(__fastcall*)(_QWORD, __int64))FindExport((__int64)&unk_46D00),
+                    (qword_4DF00 = (__int64)v19) != 0))
+            {
+                LOBYTE(v16) = oldIrql;
+                v19(0i64, v16);
+            }
+        }
+    }
+    return copiedSize;
+}
 
     /**
      * Checks if an address range lies within a kernel module.

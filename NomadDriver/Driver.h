@@ -9,7 +9,6 @@
 #define PAGE_SIZE 0x1000
 #define PML4_OFFSET_MASK 0b00000000 11111111 00000000 00000000 00000000 00000000 00000000 00000000
 
-#define ZW_QUERY_INFO 0
 #define SYS_MOD_INF 0x0B
 
 #define DEBUG
@@ -45,6 +44,27 @@ typedef struct _LDR_DATA_TABLE_ENTRY
 	LIST_ENTRY HashLinks;
 	ULONG TimeDateStamp;
 } LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
+
+typedef struct _SYSTEM_MODULE_ENTRY
+{
+	ULONG  Unused;
+	ULONG  Always0;
+	PVOID  ModuleBaseAddress;
+	ULONG  ModuleSize;
+	ULONG  Unknown;
+	ULONG  ModuleEntryIndex;
+	USHORT ModuleNameLength;
+	USHORT ModuleNameOffset;
+	CHAR   ModuleName[256];
+
+} 	SYSTEM_MODULE_ENTRY, * PSYSTEM_MODULE_ENTRY;
+
+typedef struct _SYSTEM_MODULE_INFORMATION
+{
+	ULONG               	ModulesCount;
+	SYSTEM_MODULE_ENTRY		Modules[0];
+
+} 	SYSTEM_MODULE_INFORMATION, * PSYSTEM_MODULE_INFORMATION;
 
 typedef struct _RTL_PROCESS_MODULE_INFORMATION
 {
@@ -85,11 +105,6 @@ extern "C" {
 		KPROCESSOR_MODE PreviousMode,
 		PSIZE_T ReturnSize
 	);
-
-	typedef void (*GenericFuncPtr)();
-	typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
-	typedef PVOID(*MmSystemRoutinePtr)(PUNICODE_STRING);
-	typedef HANDLE(*PsGetCurrentProcessIdPtr)();
 }
 
 namespace NomadDrv {

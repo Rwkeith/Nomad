@@ -7,6 +7,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Nomad", "NomadDriver\NomadD
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug Verbose|ARM = Debug Verbose|ARM
+		Debug Verbose|ARM64 = Debug Verbose|ARM64
+		Debug Verbose|x64 = Debug Verbose|x64
+		Debug Verbose|x86 = Debug Verbose|x86
 		Debug|ARM = Debug|ARM
 		Debug|ARM64 = Debug|ARM64
 		Debug|x64 = Debug|x64
@@ -17,6 +21,18 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|ARM.ActiveCfg = DebugVerbose|ARM
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|ARM.Build.0 = DebugVerbose|ARM
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|ARM.Deploy.0 = DebugVerbose|ARM
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|ARM64.ActiveCfg = DebugVerbose|ARM64
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|ARM64.Build.0 = DebugVerbose|ARM64
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|ARM64.Deploy.0 = DebugVerbose|ARM64
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|x64.ActiveCfg = DebugVerbose|x64
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|x64.Build.0 = DebugVerbose|x64
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|x64.Deploy.0 = DebugVerbose|x64
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|x86.ActiveCfg = DebugVerbose|Win32
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|x86.Build.0 = DebugVerbose|Win32
+		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug Verbose|x86.Deploy.0 = DebugVerbose|Win32
 		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug|ARM.ActiveCfg = Debug|ARM
 		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug|ARM.Build.0 = Debug|ARM
 		{A2D95A16-9A85-4061-B474-D77A252EBCE2}.Debug|ARM.Deploy.0 = Debug|ARM
