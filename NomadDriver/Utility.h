@@ -4,12 +4,16 @@
 
 #define SystemBigPoolInformation 0x42
 #define SystemModuleInformation 0x0B
+#define STACK_BUF_SIZE 0x1000
 
-#define WINAPI_IMPORT_COUNT 4
+#define WINAPI_IMPORT_COUNT 7
 #define _ZwQuerySystemInformationIDX 0
 #define _PsGetCurrentProcessIdIDX 1
 #define _PsIsSystemThreadIDX 2
 #define _PsGetCurrentProcessIDX 3
+#define _IoThreadToProcessIDX 4
+#define _PsGetProcessIdIDX 5
+#define _RtlVirtualUnwindIDX 6
 
 typedef void (*GenericFuncPtr)();
 typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
@@ -18,6 +22,9 @@ typedef HANDLE(*PsGetCurrentProcessIdPtr)();
 typedef BOOLEAN(*PsIsSystemThreadPtr)(PETHREAD);
 typedef PEPROCESS(*PsGetCurrentProcessPtr)();
 typedef NTSTATUS(*PsLookupThreadByThreadIdPtr)(_In_ HANDLE ThreadId, _Out_ PETHREAD* Thread);
+typedef PEPROCESS(*IoThreadToProcessPtr)(_In_ PETHREAD Thread);
+typedef HANDLE(*PsGetProcessIdPtr)(_In_ PEPROCESS Process);
+typedef NTSYSAPI PEXCEPTION_ROUTINE(*RtlVirtualUnwindPtr)(_In_ DWORD HandlerType, _In_ DWORD64 ImageBase, _In_ DWORD64 ControlPc, _In_ PRUNTIME_FUNCTION FunctionEntry, _Inout_ PCONTEXT ContextRecord, _Out_ PVOID* HandlerData, _Out_ PDWORD64 EstablisherFrame,_Inout_opt_ /*PKNONVOLATILE_CONTEXT_POINTERS*/PVOID ContextPointers);
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
 	union {
@@ -36,6 +43,24 @@ typedef struct _SYSTEM_BIGPOOL_INFORMATION {
 	SYSTEM_BIGPOOL_ENTRY AllocatedInfo[ANYSIZE_ARRAY];
 } SYSTEM_BIGPOOL_INFORMATION, * PSYSTEM_BIGPOOL_INFORMATION;
 
+typedef struct _IMAGE_RUNTIME_FUNCTION_ENTRY {
+	DWORD BeginAddress;
+	DWORD EndAddress;
+	union {
+		DWORD UnwindInfoAddress;
+		DWORD UnwindData;
+	} DUMMYUNIONNAME;
+} RUNTIME_FUNCTION, * PRUNTIME_FUNCTION, _IMAGE_RUNTIME_FUNCTION_ENTRY, * _PIMAGE_RUNTIME_FUNCTION_ENTRY;
+
+typedef struct _STACKWALK_ENTRY {
+	DWORD rip;
+} STACKWALK_ENTRY, *PSTACKWALK_ENTRY;
+
+typedef struct _STACKWALK_BUFFER {
+	UINT32 EntryCount;
+	STACKWALK_ENTRY Entry[(STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(STACKWALK_ENTRY)];	// (STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(DWORD)
+} STACKWALK_BUFFER, * PSTACKWALK_BUFFER;
+
 
 class Utility
 {
@@ -46,9 +71,11 @@ public:
 	NTSTATUS EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods);
 	NTSTATUS ImportNtPrimitives();
 	bool IsValidPEHeader(_In_ const uintptr_t head);
+	bool CheckModulesForAddress(UINT64 address, PSYSTEM_MODULE_INFORMATION procMods);
 	PVOID GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject);
 	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer);
 	PVOID GetNtoskrnlBaseAddress();
+	bool GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sectionSize);
 	NTSTATUS QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
@@ -65,6 +92,9 @@ private:
 	PsIsSystemThreadPtr pPsIsSystemThread = NULL;
 	PsGetCurrentProcessPtr pPsGetCurrentProcess = NULL;
 	PsLookupThreadByThreadIdPtr pPsLookupThreadByThreadId = NULL;
+	IoThreadToProcessPtr pIoThreadToProcess = NULL;
+	PsGetProcessIdPtr pPsGetProcessId = NULL;
+	RtlVirtualUnwindPtr pRtlVirtualUnwind = NULL;
 
 	PRTL_PROCESS_MODULES outProcMods = NULL;
 

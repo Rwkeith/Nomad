@@ -130,7 +130,7 @@ NTSTATUS Utility::ImportNtPrimitives()
 {
     LogInfo("Importing windows primitives\n");
 
-    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" , L"PsGetCurrentProcessId", L"PsIsSystemThread", L"PsGetCurrentProcess" };
+    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" , L"PsGetCurrentProcessId", L"PsIsSystemThread", L"PsGetCurrentProcess", L"IoThreadToProcess", L"PsGetProcessId", L"RtlVirtualUnwind"};
     UNICODE_STRING uniNames[WINAPI_IMPORT_COUNT];
 
     for (size_t i = 0; i < WINAPI_IMPORT_COUNT; i++)
@@ -158,7 +158,9 @@ NTSTATUS Utility::ImportNtPrimitives()
     pPsGetCurrentProcessId = (PsGetCurrentProcessIdPtr)pNtPrimitives[_PsGetCurrentProcessIdIDX];
     pPsIsSystemThread = (PsIsSystemThreadPtr)pNtPrimitives[_PsIsSystemThreadIDX];
     pPsGetCurrentProcess = (PsGetCurrentProcessPtr)pNtPrimitives[_PsGetCurrentProcessIDX];
-
+    pIoThreadToProcess = (IoThreadToProcessPtr)pNtPrimitives[_IoThreadToProcessIDX];
+    pPsGetProcessId = (PsGetProcessIdPtr)pNtPrimitives[_PsGetProcessIdIDX];
+    pRtlVirtualUnwind = (RtlVirtualUnwindPtr)pNtPrimitives[_RtlVirtualUnwindIDX];
 
     return STATUS_SUCCESS;
 }
@@ -168,26 +170,20 @@ bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
     // ideally should parse the PT so this can't be IAT spoofed
     if (!MmIsAddressValid((PVOID)pHead))
     {
-#ifdef VERBOSE_LOG
         LogError("Was unable to read page @ 0x%p", (PVOID)pHead);
-#endif
-        return FALSE;
+        return false;
     }
 
     if (!pHead)
     {
-#ifdef VERBOSE_LOG
         LogInfo("pHead is null @ 0x%p", (PVOID)pHead);
-#endif
-        return FALSE;
+        return false;
     }
 
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_magic != E_MAGIC)
     {
-#ifdef VERBOSE_LOG
         LogInfo("pHead is != 0x%02x @ %p", E_MAGIC, (PVOID)pHead);
-#endif
-        return FALSE;
+        return false;
     }
 
     const auto ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS64>(pHead + reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_lfanew);
@@ -195,22 +191,18 @@ bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
     // avoid reading a page not paged in
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_lfanew > 0x1000)
     {
-#ifdef VERBOSE_LOG
         LogInfo("pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", (PVOID)pHead);
-#endif
-        return FALSE;
+        return false;
     }
 
     if (ntHeader->Signature != NT_HDR_SIG)
     {
-#ifdef VERBOSE_LOG
         LogInfo("ntHeader->Signature != 0x%02x @ 0x%p", NT_HDR_SIG, (PVOID)pHead);
-#endif
-        return FALSE;
+        return false;
     }
 
     LogInfo("Found valid PE header @ 0x%p", (PVOID)pHead);
-    return TRUE;
+    return true;
 }
 
 // @ weak1337
@@ -357,6 +349,64 @@ NTSTATUS Utility::QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* da
     return STATUS_SUCCESS;
 }
 
+bool Utility::CheckModulesForAddress(UINT64 address, PSYSTEM_MODULE_INFORMATION procMods)
+{
+    for (size_t i = 0; i < procMods->ModulesCount; i++)
+    {
+        SYSTEM_MODULE_ENTRY sysMod = procMods->Modules[i];
+        if ((UINT64)sysMod.ModuleBaseAddress < address && address < ((UINT64)sysMod.ModuleBaseAddress + sysMod.ModuleSize))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sectionSize)
+{
+    if (!kernBase)
+    {
+        kernBase = GetNtoskrnlBaseAddress();
+    }
+    
+    if (reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_magic != E_MAGIC)
+    {
+        LogInfo("GetNtoskrnlSection() expected MZ header != 0x%02x @ %p", E_MAGIC, kernBase);
+        return FALSE;
+    }
+
+    const auto ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS64>((BYTE*)kernBase + reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_lfanew);
+
+    // avoid reading a page not paged in
+    if (reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_lfanew > 0x1000)
+    {
+        LogInfo("GetNtoskrnlSection() pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", kernBase);
+        return FALSE;
+    }
+
+    if (ntHeader->Signature != NT_HDR_SIG)
+    {
+        LogInfo("GetNtoskrnlSection() ntHeader->Signature != 0x%02x @ 0x%p", NT_HDR_SIG, kernBase);
+        return FALSE;
+    }
+
+    auto ntSection = reinterpret_cast<PIMAGE_SECTION_HEADER>((BYTE*)ntHeader + sizeof(PIMAGE_NT_HEADERS64));
+    
+    for (size_t i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
+    {
+        char* ret = strstr((char*)ntSection[i].Name, sectionName);
+
+        if (ret)
+        {
+            *sectionVa = ntSection[i].VirtualAddress;
+            *sectionSize = ntSection[i].Misc.VirtualSize;
+            LogInfo("Found %s in ntoskrnl.exe at %p , size %04x\n", sectionName, *sectionVa, *sectionSize);
+            return true;
+        }
+    }
+    
+    return false;
+}
 /// EAC's System thread scanning method
 // https://www.unknowncheats.me/forum/anti-cheat-bypass/325212-eac-system-thread-detection.html
 NTSTATUS Utility::ScanSystemThreads()
@@ -368,8 +418,10 @@ NTSTATUS Utility::ScanSystemThreads()
     PSYSTEM_MODULE_INFORMATION systemModuleInformation;
     CONTEXT* context;
     UINT64 currentThreadId;
-    signed int status0;
-    STACKWALK_ENTRY* entry;
+    UINT64 processID;
+    PEPROCESS processObject;
+
+    NTSTATUS status;
     __int64 v10;
     int entryIndex;
     __int64 v12;
@@ -425,56 +477,41 @@ NTSTATUS Utility::ScanSystemThreads()
                     currentThreadId = 4;
                     do
                     {
-                        if (pPsLookupThreadByThreadId)
-                            status0 = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
-                        else
-                            status0 = 0xC0000002;
+                        status = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
 
-                        if (status0 >= 0)
+                        if (status >= 0)
                         {
-                            if (GetProcessId((__int64)threadObject) == currentProcessId
-                                && threadObject != (PVOID)__readgsqword(0x188u)
-                                && StackwalkThread((__int64)threadObject, context, &stackwalkBuffer)
-                                && stackwalkBuffer.EntryCount > 0u)
+                            processObject = pIoThreadToProcess((PETHREAD)threadObject);
+
+                            if (!processObject)
                             {
-                                entry = stackwalkBuffer.Entries;
-                                while (1)
-                                {
-                                    if (!GetModuleEntryForAddress(entry->RipValue, &systemModuleInformation->Count))
-                                    {
-                                        if (!v10)
-                                            break;
-                                        if (!v12)
-                                            break;
-                                        v13 = *(_QWORD*)(v12 + 24);
-                                        if (!v13
-                                            || *(_DWORD*)(v12 + 32) <= 0u
-                                            || entry->RipValue < v13
-                                            || entry->RipValue >= v13 + *(unsigned int*)(v12 + 32))
-                                        {
-                                            break;
-                                        }
-                                    }
-                                    ++entry;
-                                    if ((unsigned int)(entryIndex + 1) >= stackwalkBuffer.EntryCount)
-                                        goto LABEL_30;
-                                }
-                                status1 = QueryWin32StartAddress((__int64)threadObject, &win32StartAddress);
-                                if (status1 < 0)
-                                    win32StartAddress = 0i64;
-                                threadProcessId = GetProcessId((__int64)threadObject);
-                                PerformAdditionalScans(         // This is virtualized.
-                                                                // Probably checks if address is within any big pool and sends report to server.
-                                    threadProcessId,
-                                    (unsigned int)currentThreadId,
-                                    win32StartAddress,
-                                    systemModuleInformation,
-                                    systemBigPoolInformation,
-                                    &stackwalkBuffer);
+                                LogError("\tpFailed to get process object, IoThreadToProcess((PETHREAD)threadObject) == NULL, skipping thread ID: %d\n", currentThreadId);
+                                continue;
                             }
-                        LABEL_30:
-                            ObfDereferenceObject(threadObject);
-                        }
+
+                            processID = (UINT64)pPsGetProcessId(processObject);
+
+                            if (!processID)
+                            {
+                                LogError("\tpFailed to get process id, (UINT64)pPsGetProcessId(currProcessObject) == NULL, skipping thread ID: %d\n", currentThreadId);
+                                continue;
+                            }
+
+                            if (processID == currentProcessId   // if...the thread's pid is the same as system pid, and threadobject 
+                                && threadObject != (PVOID)__readgsqword(0x188)     // __readgsqword(0x188) == return (struct _KTHREAD *)__readgsqword(0x188) , and thread obj is not our current thread
+                                && StackwalkThread((__int64)threadObject, context, &stackwalkBuffer)    // and succesfully walks the stack of thread
+                                && stackwalkBuffer.EntryCount > 0)     // and has more than 1 entry in the stack
+                            {
+                                for (size_t i = 0; i < stackwalkBuffer.Entries; i++)
+                                {
+                                    if (!CheckModulesForAddress(entry[i]->RipValue, systemModuleInformation))
+                                    {
+
+                                    }
+                                }
+                            }
+                            ObfDereferenceObject(threadObject); // reference count was incremented on pPsLookupThreadByThreadId
+                        }               
                         currentThreadId += 4;    // thread id's are multiple of 4
                     } while (currentThreadId < 0x3000);     // lol, brute force method by EAC.  Maybe there's a better way
                     ExFreePool(context);
@@ -482,6 +519,7 @@ NTSTATUS Utility::ScanSystemThreads()
                 else
                 {
                     LogError("\tUtility.cpp:418, ExAllocatePool failed\n");
+                    return result;
                 }
                 ExFreePool(systemModuleInformation);
             }
@@ -501,41 +539,35 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
     unsigned int index; // ebp
     unsigned __int64 rip0; // rcx
     DWORD64 rsp0; // rdx
-    __int64 functionTableEntry; // rax
+    PRUNTIME_FUNCTION functionTableEntry; // rax
     __int64 moduleBase; // [rsp+40h] [rbp-48h]
     __int64 v17; // [rsp+48h] [rbp-40h]
     __int64 v18; // [rsp+50h] [rbp-38h]
-    unsigned __int64 sectionVa; // [rsp+90h] [rbp+8h]
-    __int64 sectionSize; // [rsp+A8h] [rbp+20h]
+    DWORD sectionVa; // [rsp+90h] [rbp+8h]
+    DWORD sectionSize; // [rsp+A8h] [rbp+20h]
 
     status = 0;
     if (!threadObject)
         return 0;
     if (!stackwalkBuffer)
         return 0;
-    memset(context, 0, 0x4D0ui64);
+    memset(context, 0, sizeof(CONTEXT));
     memset(stackwalkBuffer, 0, 0x208ui64);
-    if (!import_RtlVirtualUnwind)
-    {
-        import_RtlVirtualUnwind = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_47420);
-        if (!import_RtlVirtualUnwind)
-            return 0;
-    }
     if (!import_RtlLookupFunctionEntry)
     {
         import_RtlLookupFunctionEntry = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_473F0);
         if (!import_RtlLookupFunctionEntry)
             return 0;
     }
-    stackBuffer = (_QWORD*)AllocatePool(4096i64);
+    stackBuffer = (_QWORD*)ExAllocatePool(NonPagedPool, STACK_BUF_SIZE);   // sizeof(stackBuffer) == 4096 / 0x1000
     if (stackBuffer)
     {
-        copiedSize = CopyThreadKernelStack(threadObject, 4096i64, stackBuffer, 4096);
+        copiedSize = CopyThreadKernelStack(threadObject, 4096, stackBuffer, 4096);
         if (copiedSize)
         {
             if (copiedSize != 4096 && copiedSize >= 0x48)
             {
-                if (GetNtoskrnlSection('txet.', &sectionVa, &sectionSize))
+                if (GetNtoskrnlSection(".text", &sectionVa, &sectionSize))
                 {
                     startRip = stackBuffer[7];
                     if (startRip >= sectionVa && startRip < sectionSize + sectionVa)
@@ -557,7 +589,7 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
                             functionTableEntry = import_RtlLookupFunctionEntry(rip0, &moduleBase, 0i64);
                             if (!functionTableEntry)
                                 break;
-                            import_RtlVirtualUnwind(0i64, moduleBase, context->Rip, functionTableEntry, context, &v18, &v17, 0i64);
+                            pRtlVirtualUnwind(0, moduleBase, context->Rip, functionTableEntry, context, &v18, &v17, 0);
                             if (!context->Rip)
                             {
                                 stackwalkBuffer->Succeded = 1;
@@ -567,9 +599,10 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
                         } while (index < 0x20);
                     }
                 }
+                LogError("Unable to find .text section of ntoskrnl");
             }
         }
-        FinalizeFreePool((__int64)stackBuffer);
+        ExFreePool(stackBuffer);
     }
     return status;
 }
