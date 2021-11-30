@@ -6,7 +6,7 @@
 #define SystemModuleInformation 0x0B
 #define STACK_BUF_SIZE 0x1000
 
-#define WINAPI_IMPORT_COUNT 7
+#define WINAPI_IMPORT_COUNT 8
 #define _ZwQuerySystemInformationIDX 0
 #define _PsGetCurrentProcessIdIDX 1
 #define _PsIsSystemThreadIDX 2
@@ -14,6 +14,7 @@
 #define _IoThreadToProcessIDX 4
 #define _PsGetProcessIdIDX 5
 #define _RtlVirtualUnwindIDX 6
+#define _RtlLookupFunctionEntryIDX 7
 
 typedef void (*GenericFuncPtr)();
 typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
@@ -25,6 +26,7 @@ typedef NTSTATUS(*PsLookupThreadByThreadIdPtr)(_In_ HANDLE ThreadId, _Out_ PETHR
 typedef PEPROCESS(*IoThreadToProcessPtr)(_In_ PETHREAD Thread);
 typedef HANDLE(*PsGetProcessIdPtr)(_In_ PEPROCESS Process);
 typedef NTSYSAPI PEXCEPTION_ROUTINE(*RtlVirtualUnwindPtr)(_In_ DWORD HandlerType, _In_ DWORD64 ImageBase, _In_ DWORD64 ControlPc, _In_ PRUNTIME_FUNCTION FunctionEntry, _Inout_ PCONTEXT ContextRecord, _Out_ PVOID* HandlerData, _Out_ PDWORD64 EstablisherFrame,_Inout_opt_ /*PKNONVOLATILE_CONTEXT_POINTERS*/PVOID ContextPointers);
+typedef NTSYSAPI PRUNTIME_FUNCTION(*RtlLookupFunctionEntryPtr)(_In_ DWORD64 ControlPc, _Out_ PDWORD64 ImageBase, _Out_ /*PUNWIND_HISTORY_TABLE*/PVOID HistoryTable);
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
 	union {
@@ -61,7 +63,6 @@ typedef struct _STACKWALK_BUFFER {
 	STACKWALK_ENTRY Entry[(STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(STACKWALK_ENTRY)];	// (STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(DWORD)
 } STACKWALK_BUFFER, * PSTACKWALK_BUFFER;
 
-
 class Utility
 {
 public:
@@ -79,10 +80,11 @@ public:
 	NTSTATUS QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
+	__int64 __stdcall GetThreadStateOffset(__int64 a1, __int64 a2);
 
 	NTSTATUS ScanSystemThreads();
-	size_t CopyThreadKernelStack(__int64 threadObject, __int64 maxSize, void* outStackBuffer, signed int a4);
-	char StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_BUFFER* stackwalkBuffer);
+	size_t CopyThreadKernelStack(_In_ PETHREAD threadObject, __int64 maxSize, void* outStackBuffer, signed int a4);
+	bool StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
 
 private:
 	GenericFuncPtr pNtPrimitives[WINAPI_IMPORT_COUNT];
@@ -95,8 +97,11 @@ private:
 	IoThreadToProcessPtr pIoThreadToProcess = NULL;
 	PsGetProcessIdPtr pPsGetProcessId = NULL;
 	RtlVirtualUnwindPtr pRtlVirtualUnwind = NULL;
+	RtlLookupFunctionEntryPtr pRtlLookupFunctionEntry = NULL;
 
 	PRTL_PROCESS_MODULES outProcMods = NULL;
+
+	UINT32 gkThreadStateOffset = 0;
 
 	PVOID kernBase = NULL;
 };

@@ -161,6 +161,7 @@ NTSTATUS Utility::ImportNtPrimitives()
     pIoThreadToProcess = (IoThreadToProcessPtr)pNtPrimitives[_IoThreadToProcessIDX];
     pPsGetProcessId = (PsGetProcessIdPtr)pNtPrimitives[_PsGetProcessIdIDX];
     pRtlVirtualUnwind = (RtlVirtualUnwindPtr)pNtPrimitives[_RtlVirtualUnwindIDX];
+    pRtlLookupFunctionEntry = (RtlLookupFunctionEntryPtr)pNtPrimitives[_RtlLookupFunctionEntryIDX];
 
     return STATUS_SUCCESS;
 }
@@ -499,7 +500,7 @@ NTSTATUS Utility::ScanSystemThreads()
 
                             if (processID == currentProcessId   // if...the thread's pid is the same as system pid, and threadobject 
                                 && threadObject != (PVOID)__readgsqword(0x188)     // __readgsqword(0x188) == return (struct _KTHREAD *)__readgsqword(0x188) , and thread obj is not our current thread
-                                && StackwalkThread((__int64)threadObject, context, &stackwalkBuffer)    // and succesfully walks the stack of thread
+                                && StackwalkThread(threadObject, context, &stackwalkBuffer)    // and succesfully walks the stack of thread
                                 && stackwalkBuffer.EntryCount > 0)     // and has more than 1 entry in the stack
                             {
                                 for (size_t i = 0; i < stackwalkBuffer.Entries; i++)
@@ -530,7 +531,7 @@ NTSTATUS Utility::ScanSystemThreads()
     return result;
 }
 
-char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_BUFFER* stackwalkBuffer)
+bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
 {
     char status; // di
     _QWORD* stackBuffer; // rax MAPDST
@@ -552,14 +553,9 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
     if (!stackwalkBuffer)
         return 0;
     memset(context, 0, sizeof(CONTEXT));
-    memset(stackwalkBuffer, 0, 0x208ui64);
-    if (!import_RtlLookupFunctionEntry)
-    {
-        import_RtlLookupFunctionEntry = (__int64(__fastcall*)(_QWORD, _QWORD, _QWORD))FindExport((__int64)&unk_473F0);
-        if (!import_RtlLookupFunctionEntry)
-            return 0;
-    }
-    stackBuffer = (_QWORD*)ExAllocatePool(NonPagedPool, STACK_BUF_SIZE);   // sizeof(stackBuffer) == 4096 / 0x1000
+    memset(stackwalkBuffer, 0, 0x208);
+    
+    stackBuffer = (_QWORD*)ExAllocatePool(NonPagedPool, STACK_BUF_SIZE);   // sizeof(stackBuffer) == 4096 || 0x1000
     if (stackBuffer)
     {
         copiedSize = CopyThreadKernelStack(threadObject, 4096, stackBuffer, 4096);
@@ -586,7 +582,7 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
                                 break;
                             if (rsp0 < MmSystemRangeStart)
                                 break;
-                            functionTableEntry = import_RtlLookupFunctionEntry(rip0, &moduleBase, 0i64);
+                            functionTableEntry = pRtlLookupFunctionEntry(rip0, &moduleBase, 0);
                             if (!functionTableEntry)
                                 break;
                             pRtlVirtualUnwind(0, moduleBase, context->Rip, functionTableEntry, context, &v18, &v17, 0);
@@ -600,6 +596,7 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
                     }
                 }
                 LogError("Unable to find .text section of ntoskrnl");
+                return 
             }
         }
         ExFreePool(stackBuffer);
@@ -607,7 +604,7 @@ char Utility::StackwalkThread(__int64 threadObject, CONTEXT* context, STACKWALK_
     return status;
 }
 
-size_t Utility::CopyThreadKernelStack(__int64 threadObject, __int64 maxSize, void* outStackBuffer, signed int a4)
+size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, void* outStackBuffer, signed int a4)
 {
     size_t copiedSize; // rsi
     __int64 threadStateOffset; // r12 MAPDST
@@ -617,56 +614,62 @@ size_t Utility::CopyThreadKernelStack(__int64 threadObject, __int64 maxSize, voi
     unsigned int threadStackLimitOffset; // eax
     unsigned __int64 threadStackLimit; // rbp
     int isSystemThread; // er11
-    const void** pKernelStack; // r12
+    void** pKernelStack; // r12
     __int64 v16; // rdx
     unsigned int threadLockOffset; // eax
     KSPIN_LOCK* threadLock; // rcx
-    void(__fastcall * v19)(_QWORD, __int64); // rax
+    unsigned int ThreadPriorityOffset; // rax
     unsigned __int8 oldIrql; // [rsp+50h] [rbp+8h]
 
-    copiedSize = 0i64;
+    copiedSize = 0;
     threadStateOffset = (unsigned int)GetThreadStateOffset(a4);
     kernelStackOffset = (unsigned int)GetKernelStackOffset();
     threadStackBaseOffset = GetThreadStackBaseOffset();
     if (threadObject && threadStackBaseOffset)
         threadStackBase = *(_QWORD*)(threadStackBaseOffset + threadObject);
     else
-        threadStackBase = 0i64;
+        threadStackBase = 0;
     threadStackLimitOffset = GetThreadStackLimitOffset();
     if (!threadObject)
-        return 0i64;
-    threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + threadObject) : 0i64;
-    isSystemThread = import_PsIsSystemThread ? (unsigned __int8)import_PsIsSystemThread(threadObject) : 0;
+        return 0;
+    threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + (BYTE*)threadObject) : 0;
+    isSystemThread = pPsIsSystemThread ? (unsigned __int8)pPsIsSystemThread(threadObject) : 0;
     if (!isSystemThread
         || !outStackBuffer
-        || !(_DWORD)threadStateOffset
-        || !(_DWORD)kernelStackOffset
+        || !(DWORD)threadStateOffset
+        || !(DWORD)kernelStackOffset
         || !threadStackBase
         || !threadStackLimit
-        || KeGetCurrentIrql() > 1u
-        || threadObject == __readgsqword(0x188u))
+        || KeGetCurrentIrql() > 1
+        || (UINT64)threadObject == __readgsqword(0x188))
     {
-        return 0i64;
+        return 0;
     }
-    pKernelStack = (const void**)(threadObject + kernelStackOffset);
-    memset(outStackBuffer, 0, 0x1000ui64);
+    pKernelStack = (void**)((BYTE*)threadObject + kernelStackOffset);
+    memset(outStackBuffer, 0, 0x1000);
     if (LockThread(&oldIrql, threadObject, 0x1000))
     {
-        if (!(unsigned __int8)PsIsThreadTerminating(threadObject)
-            && *(_BYTE*)(threadStateOffset + threadObject) == 5
+        if (!PsIsThreadTerminating(threadObject)
+            && *(BYTE*)(threadStateOffset + (BYTE*)threadObject) == 5
             && (unsigned __int64)*pKernelStack > threadStackLimit
             && (unsigned __int64)*pKernelStack < threadStackBase
-            && MmGetPhysicalAddress(*pKernelStack))
+            /* && (PVOID)MmGetPhysicalAddress(*pKernelStack)*/)
         {
-            copiedSize = threadStackBase - (_QWORD)*pKernelStack;
-            if (copiedSize > 0x1000)
-                copiedSize = 0x1000i64;
-            memmove(outStackBuffer, *pKernelStack, copiedSize);
+            PHYSICAL_ADDRESS physAddr = MmGetPhysicalAddress(*pKernelStack);
+            if (physAddr.QuadPart)
+            {
+                copiedSize = threadStackBase - (_QWORD)*pKernelStack;
+                if (copiedSize > 0x1000)
+                    copiedSize = 0x1000;
+                memmove(outStackBuffer, *pKernelStack, copiedSize);
+            }
         }
-        if (MEMORY[0xFFFFF7800000026C] >= 6u && (MEMORY[0xFFFFF7800000026C] != 6 || MEMORY[0xFFFFF78000000270]))
+        if (SharedUserData->NtMajorVersion >= 6 && SharedUserData->NtMajorVersion != 6 || SharedUserData->NtMinorVersion) //  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
         {
             threadLockOffset = GetThreadLockOffset(0x1000);
-            threadLock = (KSPIN_LOCK*)((threadObject + threadLockOffset) & -(signed __int64)(threadLockOffset != 0));
+            BYTE* newthreadLock = (BYTE*)threadObject + threadLockOffset;
+            signed __int64 rightExpression = -(signed __int64)(threadLockOffset != 0);
+            threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
             if (threadLock)
             {
                 KeReleaseSpinLockFromDpcLevel(threadLock);
@@ -675,17 +678,73 @@ size_t Utility::CopyThreadKernelStack(__int64 threadObject, __int64 maxSize, voi
         }
         else
         {
-            v19 = (void(__fastcall*)(_QWORD, __int64))qword_4DF00;
-            if (qword_4DF00
-                || (v19 = (void(__fastcall*)(_QWORD, __int64))FindExport((__int64)&unk_46D00),
-                    (qword_4DF00 = (__int64)v19) != 0))
+            ThreadPriorityOffset = GetThreadPriorityOffset();
+            //if (qword_4DF00
+            //    || (ThreadPriorityOffset = (void(__fastcall*)(_QWORD, __int64))FindExport((__int64)&unk_46D00),
+            //        (qword_4DF00 = (__int64)ThreadPriorityOffset) != 0))
+            if ((((unsigned __int64)threadObject + ThreadPriorityOffset) & -(__int64)(ThreadPriorityOffset != 0)) != 0)
             {
                 LOBYTE(v16) = oldIrql;
-                v19(0i64, v16);
+                ThreadPriorityOffset(0, v16);
             }
         }
     }
     return copiedSize;
+}
+
+__int64 __stdcall Utility::GetThreadStateOffset(__int64 a1, __int64 a2)
+{
+    unsigned int kThreadStateOffset; // eax
+    __int64 v3; // rax
+    unsigned __int64 v4; // rdi
+    unsigned __int64 i; // rbx
+    int v6; // edx
+    char v8[11]; // [rsp+20h] [rbp-38h] BYREF
+    char v9; // [rsp+2Bh] [rbp-2Dh]
+    char v10; // [rsp+2Fh] [rbp-29h]
+    char v11; // [rsp+35h] [rbp-23h]
+    unsigned int v12; // [rsp+3Dh] [rbp-1Bh]
+    int v13; // [rsp+41h] [rbp-17h]
+
+    if ((unsigned int)sub_1400011E0(&qword_140073340) == 259)
+    {
+        if (SharedUserData->NtMajorVersion == 6 && SharedUserData->NtMinorVersion == 1)     // Windows 7 check v6.1  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
+        {
+            kThreadStateOffset = 0x164;
+            gkThreadStateOffset = 0x164;
+        }
+        else
+        {
+            v3 = sub_140009D00(&unk_140056260);
+            if (v3)
+            {
+                v4 = v3 + 306;
+                for (i = (unsigned int)sub_1400200B8(v3, v8) + v3;
+                    i < v4 && (v13 & 0x1000) == 0 && ((v9 + 62) & 0xF6) != 0;
+                    i += (unsigned int)sub_1400200B8(i, v8))
+                {
+                    if ((v13 & 1) != 0 && (v13 & 0x100) != 0 && v9 == -118 && !v10 && v12 < 0x300)
+                    {
+                        gkThreadStateOffset = v12;
+                        i += (unsigned int)sub_1400200B8(i, v8);
+                        if ((v13 & 0x1000) == 0 && (v13 & 4) != 0 && v9 == 60 && v11 == 5)
+                            break;
+                        gkThreadStateOffset = 0;
+                    }
+                }
+            }
+            kThreadStateOffset = gkThreadStateOffset;
+        }
+        if (kThreadStateOffset)
+        {
+            v6 = gkThreadStateOffset;
+            if (*(_BYTE*)(__readgsqword(0x188u) + kThreadStateOffset) != 2)// (struct _KTHREAD *) + v0;  v0 is what offset member?
+                v6 = 0;
+            gkThreadStateOffset = v6;
+        }
+        _InterlockedExchange64(&qword_140073340, 2i64);
+    }
+    return (unsigned int)gkThreadStateOffset;
 }
 
     /**
