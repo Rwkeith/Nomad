@@ -822,10 +822,6 @@ __int64 Utility::GetInitialStackOffset()
     thisKThread = __readgsqword(0x188);
     if ((unsigned int)SpinLock(&gSpinLock2) == 259)
     {
-        //Export = IoGetInitialStack;
-        //if (qword_140073388
-        //    || (Export = (__int64 (*)(void))FindExport((__int64)&unk_140055EA0), (qword_140073388 = (__int64)Export) != 0))
-        //{
         v2 = (__int64)IoGetInitialStack();
         v3 = (_QWORD*)thisKThread;
         if (thisKThread < thisKThread + 760)
@@ -837,7 +833,6 @@ __int64 Utility::GetInitialStackOffset()
             }
             gInitialStackOffset = (DWORD)v3 - thisKThread;
         }
-        //}
     LABEL_9:
         _InterlockedExchange64(&gSpinLock2, 2);
     }
@@ -908,12 +903,12 @@ __int64 Utility::GetThreadLockOffset()
     return (unsigned int)gThreadLockOffset;
 }
 
-UINT Utility::GetThreadStateOffset()
+UINT32 Utility::GetThreadStateOffset()
 {
     unsigned int kThreadStateOffset; // eax
-    __int64 v3; // rax
-    unsigned __int64 v4; // rdi
-    unsigned __int64 i; // rbx
+    unsigned __int8* Export; // rax
+    unsigned __int8* maxOffset; // rdi
+    unsigned __int8* i; // rbx
     int v6; // edx
     char v8[11]; // [rsp+20h] [rbp-38h] BYREF
     char v9; // [rsp+2Bh] [rbp-2Dh]
@@ -924,27 +919,25 @@ UINT Utility::GetThreadStateOffset()
 
     if ((unsigned int)SpinLock(&gSpinLock3) == 259)
     {
-        if (SharedUserData->NtMajorVersion == 6 && SharedUserData->NtMinorVersion == 1)     // Windows 7 check v6.1  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
+        if (SharedUserData->NtMajorVersion == 6 && SharedUserData->NtMinorVersion == 1)// Windows 7 check
         {
             kThreadStateOffset = 0x164;
             gkThreadStateOffset = 0x164;
         }
         else
         {
-            pKeAlertThread
-                // if not Win7, determine offset this way
-                v3 = FindExport(&KeAlertThread);     // virtualized function
-            if (v3)
+            Export = (unsigned __int8*)pKeAlertThread;
+            if (Export)
             {
-                v4 = v3 + 306;
-                for (i = (unsigned int)sub_1400200B8(v3, v8) + v3;
-                    i < v4 && (v13 & 0x1000) == 0 && ((v9 + 62) & 0xF6) != 0;
-                    i += (unsigned int)sub_1400200B8(i, v8))
+                maxOffset = Export + 0x132;
+                for (i = &Export[(unsigned int)patternMatcher(Export, (__int64)v8)];
+                    i < maxOffset && (v13 & 0x1000) == 0 && ((v9 + 62) & 0xF6) != 0;
+                    i += (unsigned int)patternMatcher(i, (__int64)v8))
                 {
                     if ((v13 & 1) != 0 && (v13 & 0x100) != 0 && v9 == -118 && !v10 && v12 < 0x300)
                     {
                         gkThreadStateOffset = v12;
-                        i += (unsigned int)sub_1400200B8(i, v8);
+                        i += (unsigned int)patternMatcher(i, (__int64)v8);
                         if ((v13 & 0x1000) == 0 && (v13 & 4) != 0 && v9 == 60 && v11 == 5)
                             break;
                         gkThreadStateOffset = 0;
@@ -955,15 +948,14 @@ UINT Utility::GetThreadStateOffset()
         }
         if (kThreadStateOffset)
         {
-            PKTHREAD pCurrThread = KeGetCurrentThread();
-            if (*((BYTE*)pCurrThread + kThreadStateOffset) != 2)    // (struct _KTHREAD *) + v0;  v0 is what offset member?
-            {
-                gkThreadStateOffset = 0;
-            }
+            v6 = gkThreadStateOffset;
+            if (*(BYTE*)(__readgsqword(0x188u) + kThreadStateOffset) != 2)
+                v6 = 0;
+            gkThreadStateOffset = v6;
         }
         _InterlockedExchange64(&gSpinLock3, 2);
     }
-    return gkThreadStateOffset;
+    return (unsigned int)gkThreadStateOffset;
 }
 
 __int64 Utility::SpinLock(volatile signed __int64* Lock)

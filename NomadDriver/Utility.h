@@ -90,7 +90,7 @@ public:
 	NTSTATUS QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
-	UINT GetThreadStateOffset();
+	UINT32 GetThreadStateOffset();
 	__int64 GetThreadStackLimit();
 	__int64 GetThreadLockOffset();
 	__int64 SpinLock(volatile signed __int64* Lock);
