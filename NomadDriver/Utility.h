@@ -98,6 +98,7 @@ public:
 	__int64 GetInitialStackOffset();
 	__int64 GetStackBaseOffset();
 	__int64 LockThread(__int64 Thread, unsigned __int8* Irql);
+	__int64 patternMatcher(unsigned __int8* address, __int64 outBuffer);
 	//PKTHREAD KeGetCurrentThread();
 
 	NTSTATUS ScanSystemThreads();
