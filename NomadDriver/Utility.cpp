@@ -685,7 +685,8 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         }
         else
         {
-            KeReleaseQueuedSpinLock(0, oldIrql);
+            LOBYTE(_oldIrql) = oldIrql;
+            KeReleaseQueuedSpinLock(0, _oldIrql);
         }
     }
     return copiedSize;
@@ -1410,10 +1411,10 @@ LABEL_133:
                 goto LABEL_146;
             }
         LABEL_151:
-            *(_DWORD*)(outBuffer + 33) |= 0x210u;
+            *(DWORD*)(outBuffer + 33) |= 0x210u;
             v54 = *(DWORD*)_localAddress;
             LOBYTE(_localAddress) = (BYTE)_localAddress + 4;
-            *(_DWORD*)(outBuffer + 21) = v54;
+            *(DWORD*)(outBuffer + 21) = v54;
             goto LABEL_146;
         }
         if (v4)

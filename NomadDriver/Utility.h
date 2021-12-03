@@ -2,6 +2,13 @@
 #include <ntifs.h>
 #include "Driver.h"
 
+
+#define LAST_IND(x,part_type)    (sizeof(x)/sizeof(part_type) - 1)
+#define HIGH_IND(x,part_type)  LAST_IND(x,part_type)
+#define LOW_IND(x,part_type)   0
+#define BYTEn(x, n)   (*((BYTE*)&(x)+n))
+#define LOBYTE(x)  BYTEn(x,LOW_IND(x,BYTE))
+
 #define CURRENT_KTHREAD_PTR 0x188
 #define SystemBigPoolInformation 0x42
 #define SystemModuleInformation 0x0B
