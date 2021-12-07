@@ -425,6 +425,7 @@ NTSTATUS Utility::ScanSystemThreads()
     UINT64 currentThreadId;
     UINT64 processID;
     PEPROCESS processObject;
+    STACKWALK_ENTRY* entry;
 
     NTSTATUS status;
     __int64 v10;
@@ -507,11 +508,12 @@ NTSTATUS Utility::ScanSystemThreads()
                                 && StackwalkThread(threadObject, context, &stackwalkBuffer)    // and succesfully walks the stack of thread
                                 && stackwalkBuffer.EntryCount > 0)     // and has more than 1 entry in the stack
                             {
-                                for (size_t i = 0; i < stackwalkBuffer.Entries; i++)
+                                for (size_t i = 0; i < stackwalkBuffer.EntryCount; i++)
                                 {
-                                    if (!CheckModulesForAddress(entry[i]->RipValue, systemModuleInformation))
+                                    if (!CheckModulesForAddress(stackwalkBuffer.Entry[i].RipValue, systemModuleInformation))
                                     {
-
+                                        LogInfo("\tSUSPICIOUS THREAD DETECTED\n");
+                                        break;
                                     }
                                 }
                             }
@@ -562,7 +564,7 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
     stackBuffer = (_QWORD*)ExAllocatePool(NonPagedPool, STACK_BUF_SIZE);   // sizeof(stackBuffer) == 4096 || 0x1000
     if (stackBuffer)
     {
-        copiedSize = CopyThreadKernelStack(threadObject, 4096, stackBuffer, 4096);
+        copiedSize = CopyThreadKernelStack(threadObject, STACK_BUF_SIZE, stackBuffer);
         if (copiedSize)
         {
             if (copiedSize != 4096 && copiedSize >= 0x48)
@@ -580,19 +582,19 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
                         {
                             rip0 = context->Rip;
                             rsp0 = context->Rsp;
-                            stackwalkBuffer->Entries[stackwalkBuffer->EntryCount].RipValue = rip0;
-                            stackwalkBuffer->Entries[stackwalkBuffer->EntryCount++].RspValue = rsp0;
-                            if (rip0 < MmSystemRangeStart)
+                            stackwalkBuffer->Entry[stackwalkBuffer->EntryCount].RipValue = rip0;
+                            stackwalkBuffer->Entry[stackwalkBuffer->EntryCount++].RspValue = rsp0;
+                            if (rip0 < (unsigned long long)MmSystemRangeStart)
                                 break;
-                            if (rsp0 < MmSystemRangeStart)
+                            if (rsp0 < (unsigned long long)MmSystemRangeStart)
                                 break;
-                            functionTableEntry = pRtlLookupFunctionEntry(rip0, &moduleBase, 0);
+                            functionTableEntry = pRtlLookupFunctionEntry(rip0, (PDWORD64)&moduleBase, 0);
                             if (!functionTableEntry)
                                 break;
-                            pRtlVirtualUnwind(0, moduleBase, context->Rip, functionTableEntry, context, &v18, &v17, 0);
+                            pRtlVirtualUnwind(0, moduleBase, context->Rip, functionTableEntry, context, (PVOID*)&v18, (PDWORD64)&v17, 0);
                             if (!context->Rip)
                             {
-                                stackwalkBuffer->Succeded = 1;
+                                stackwalkBuffer->Succeeded = 1;
                                 break;
                             }
                             ++index;
@@ -600,7 +602,7 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
                     }
                 }
                 LogError("Unable to find .text section of ntoskrnl");
-                return 
+                return 0;
             }
         }
         ExFreePool(stackBuffer);
@@ -608,7 +610,7 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
     return status;
 }
 
-size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, void* outStackBuffer, signed int a4)
+size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, void* outStackBuffer)
 {
     size_t copiedSize;
     size_t threadStateOffset;
@@ -911,12 +913,7 @@ UINT32 Utility::GetThreadStateOffset()
     unsigned __int8* maxOffset; // rdi
     unsigned __int8* i; // rbx
     int v6; // edx
-    char v8[11]; // [rsp+20h] [rbp-38h] BYREF
-    char v9; // [rsp+2Bh] [rbp-2Dh]
-    char v10; // [rsp+2Fh] [rbp-29h]
-    char v11; // [rsp+35h] [rbp-23h]
-    unsigned int v12; // [rsp+3Dh] [rbp-1Bh]
-    int v13; // [rsp+41h] [rbp-17h]
+    char outBuf[37];
 
     if ((unsigned int)SpinLock(&gSpinLock3) == 259)
     {
@@ -930,16 +927,20 @@ UINT32 Utility::GetThreadStateOffset()
             Export = (unsigned __int8*)pKeAlertThread;
             if (Export)
             {
-                maxOffset = Export + 0x132;
-                for (i = &Export[(unsigned int)patternMatcher(Export, (__int64)v8)];
-                    i < maxOffset && (v13 & 0x1000) == 0 && ((v9 + 62) & 0xF6) != 0;
-                    i += (unsigned int)patternMatcher(i, (__int64)v8))
+                maxOffset = Export + 0x132;             // v4 is some offset to v3.  v3 must be a ptr to some struct
+                for (i = &Export[(unsigned int)patternMatcher(Export, (__int64)outBuf)];
+                    i < maxOffset && (*(WORD*)&outBuf[33] & 0x1000) == 0 && ((outBuf[11] + 62) & 0xF6) != 0;
+                    i += (unsigned int)patternMatcher(i, (__int64)outBuf))
                 {
-                    if ((v13 & 1) != 0 && (v13 & 0x100) != 0 && v9 == -118 && !v10 && v12 < 0x300)
+                    if ((outBuf[33] & 1) != 0
+                        && (*(WORD*)&outBuf[33] & 0x100) != 0
+                        && outBuf[11] == -118
+                        && !outBuf[15]
+                        && *(DWORD*)&outBuf[29] < 0x300u)
                     {
-                        gkThreadStateOffset = v12;
-                        i += (unsigned int)patternMatcher(i, (__int64)v8);
-                        if ((v13 & 0x1000) == 0 && (v13 & 4) != 0 && v9 == 60 && v11 == 5)
+                        gkThreadStateOffset = *(DWORD*)&outBuf[29];
+                        i += (unsigned int)patternMatcher(i, (__int64)outBuf);
+                        if ((*(WORD*)&outBuf[33] & 0x1000) == 0 && (outBuf[33] & 4) != 0 && outBuf[11] == 60 && outBuf[21] == 5)
                             break;
                         gkThreadStateOffset = 0;
                     }
@@ -1030,8 +1031,44 @@ __int64 Utility::patternMatcher(unsigned __int8* address, __int64 outBuffer)
     unsigned __int8 v58; // [rsp+70h] [rbp+18h]
     char v59; // [rsp+78h] [rbp+20h]
 
+    BYTE unk_1400567A0[] = { 0xA5, 0xAA, 0xA5, 0xB8, 0xA5, 0xAA, 0xA5, 0xAA, 0xA5, 0xB8, 0xA5, 0xB8, 0xA5, 0xB8, 0xA5, 0xB8, 0xC0, 0xC0, 0xC0, 
+                                0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xAC, 0xC0, 0xCC, 0xC0, 0xA1, 0xA1, 0xA1, 0xA1, 0xB1, 0xA5, 0xA5, 0xA6, 0xC0, 0xC0, 
+                                0xD7, 0xDA, 0xE0, 0xC0, 0xE4, 0xC0, 0xEA, 0xEA, 0xE0, 0xE0, 0x98, 0xC8, 0xEE, 0xF1, 0xA5, 0xD3, 0xA5, 0xA5, 0xA1, 
+                                0xEA, 0x9E, 0xC0, 0xC0, 0xC2, 0xC0, 0xE6, 0x03, 0x7F, 0x11, 0x7F, 0x01, 0x7F, 0x01, 0x3F, 0x01, 0x01 };
+
+    BYTE unk_1400567EA[] = { 0xAB, 0x8B, 0x90, 0x64, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x92, 0x5B, 0x5B, 0x76, 0x90, 0x92, 0x92, 0x5B, 0x5B, 0x5B,
+                                0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x6A, 0x73, 0x90, 0x5B, 0x52, 0x52, 0x52, 0x52, 0x5B, 0x5B,
+                                0x5B, 0x5B, 0x77, 0x7C, 0x77, 0x85, 0x5B, 0x5B, 0x70, 0x5B, 0x7A, 0xAF, 0x76, 0x76, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B,
+                                0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x86, 0x01, 0x03, 0x01, 0x04, 0x03, 0xD5, 0x03, 0xD5, 0x03, 0xCC, 0x01, 0xBC,
+                                0x03, 0xF0, 0x03, 0x03, 0x04, 0x00, 0x50, 0x50, 0x50, 0x50, 0xFF, 0x20, 0x20, 0x20, 0x20, 0x01, 0x01, 0x01, 0x01,
+                                0xC4, 0x02, 0x10, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x03, 0x11, 0xFF, 0x03, 0xC4, 0xC6, 0xC8, 0x02, 0x10, 0x00, 0xFF,
+                                0xCC, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x03, 0x01, 0xFF, 0xFF, 0xC0, 0xC2, 0x10, 0x11, 0x02,
+                                0x03, 0x01, 0x01, 0x01, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x10, 0x10,
+                                0x10, 0x10, 0x02, 0x10, 0x00, 0x00, 0xC6, 0xC8, 0x02, 0x02, 0x02, 0x02, 0x06, 0x00, 0x04, 0x00, 0x02, 0xFF, 0x00,
+                                0xC0, 0xC2, 0x01, 0x01, 0x03, 0x03, 0x03, 0xCA, 0x40, 0x00, 0x0A, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x7F, 0x00,
+                                0x33, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xBF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00,
+                                0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+                                0x00, 0xBF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7F, 0x00, 0x00, 0xFF, 0x40, 0x40, 0x40, 0x40, 0x41,
+                                0x49, 0x40, 0x40, 0x40, 0x40, 0x4C, 0x42, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x4F, 0x44, 0x53, 0x40,
+                                0x40, 0x40, 0x44, 0x57, 0x43, 0x5C, 0x40, 0x60, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+                                0x40, 0x40, 0x40, 0x64, 0x66, 0x6E, 0x6B, 0x40, 0x40, 0x6A, 0x46, 0x40, 0x40, 0x44, 0x46, 0x40, 0x40, 0x5B, 0x44,
+                                0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x06, 0x06, 0x06, 0x06, 0x01, 0x06, 0x06, 0x02, 0x06, 0x06, 0x00, 0x06, 0x00,
+                                0x0A, 0x0A, 0x00, 0x00, 0x00, 0x02, 0x07, 0x07, 0x06, 0x02, 0x0D, 0x06, 0x06, 0x06, 0x0E, 0x05, 0x05, 0x02, 0x02,
+                                0x00, 0x00, 0x04, 0x04, 0x04, 0x04, 0x05, 0x06, 0x06, 0x06, 0x00, 0x00, 0x00, 0x0E };
+
+    BYTE unk_140056978[] = { 0x62, 0xFF, 0x00, 0x8D, 0xFF, 0x00, 0xC4, 0xFF, 0x00, 0xC5, 0xFF, 0x00, 0xFF, 0xFF, 0xEB };
+
+    BYTE unk_140056966[] = { 0xAB,0x00,0xB0,0x00,0xB1,0x00,0xB3,0x00,0xBA,0xF8,0xBB,0x00,0xC0,0x00,0xC1,0x00,0xC7,0xBF };
+
+    BYTE unk_14005694E[] = { 0x00, 0x00, 0x08, 0x00, 0x10, 0x00, 0x18, 0x00, 0x20, 0x00, 0x28, 0x00, 0x30, 0x00, 0x80, 0x01, 0x82, 0x01, 0x86, 0x00, 0xF6, 0xCF, 0xFE, 0x3F };
+
+    BYTE unk_140056987[] = { 0x01, 0xFF, 0x0E, 0x12, 0x08, 0x00, 0x13, 0x09, 0x00, 0x16, 0x08, 0x00, 0x17, 0x09, 0x00, 0x2B, 0x09, 0x00, 0xAE, 0xFF, 0x07, 0xB2, 0xFF, 0x00, 0xB4, 0xFF, 0x00, 0xB5, 0xFF, 0x00, 0xC3, 0x01, 0x00, 0xC7, 0xFF, 0xBF, 0xE7, 0x08, 0x00, 0xF0, 0x02, 0x00 };
+
+    BYTE unk_1400569B1[] = { 0x0,0x0,0x0,0x0,0x0,0x0,0x0 };
+
+
     localAddr = (char)address;
-    v3 = &unk_1400567A0;
+    v3 = unk_1400567A0;
     v4 = 0;
     v5 = 0;
     v55 = 0;
@@ -1115,7 +1152,7 @@ LABEL_17:
     if ((BYTE)currentByte == 15)
     {
         LOBYTE(currentByte) = *_localAddress;
-        v3 = &unk_1400567EA;
+        v3 = unk_1400567EA;
         *(BYTE*)(outBuffer + 12) = *_localAddress++;
     }
     else if ((unsigned __int8)currentByte >= 0xA0u && (unsigned __int8)currentByte <= 0xA3u)
@@ -1152,13 +1189,9 @@ LABEL_17:
 LABEL_36:
     v19 = *(BYTE*)(outBuffer + 12);
     v20 = v14;
-    if (v19
-        && (v15 & *((BYTE*)&unk_1400567A0
-            + (currentByte & 3)
-            + (unsigned __int64)*((unsigned __int8*)&unk_1400567A0
-                + ((unsigned __int64)(unsigned __int8)currentByte >> 2)
-                + 316)
-            + 316)) != 0)
+    bool leftHalf_RightExp = (v15 & *(BYTE*)unk_1400567A0 + (currentByte & 3) + (unsigned __int64)*((unsigned __int8*)unk_1400567A0 + ((unsigned __int64)(unsigned __int8)currentByte >> 2) + 316) + 316);
+    bool rightExp = leftHalf_RightExp != 0;
+    if (v19 && rightExp)
     {
         v20 = v14 | 0x3000;
         *(DWORD*)(outBuffer + 33) = v14 | 0x3000;
@@ -1196,12 +1229,12 @@ LABEL_36:
             if (v24 == 3)
             {
                 v31 = v58;
-                v32 = *((BYTE*)&unk_1400567A0 + 8 * v30 + v26 + 260);
+                v32 = *((BYTE*)unk_1400567A0 + 8 * v30 + v26 + 260);
             }
             else
             {
                 v31 = v26;
-                v32 = *((BYTE*)&unk_1400567A0 + v30 + 253);
+                v32 = *((BYTE*)unk_1400567A0 + v30 + 253);
             }
             v28 = v22;
             v33 = ((v32 << v31) & 0x80u) != 0;
@@ -1224,12 +1257,12 @@ LABEL_36:
                 v35 = v27;
                 if (!v19)
                     v35 = v27 & 0xFE;
-                v36 = &unk_140056978;
+                v36 = unk_140056978;
                 if (!v19)
-                    v36 = &unk_140056966;
-                v37 = &unk_140056966;
+                    v36 = unk_140056966;
+                v37 = unk_140056966;
                 if (!v19)
-                    v37 = &unk_14005694E;
+                    v37 = unk_14005694E;
                 while (v37 != v36)
                 {
                     if (*v37 == v35)
@@ -1281,13 +1314,13 @@ LABEL_36:
         {
             if (!v19)
             {
-                v39 = &unk_140056987;
-                v38 = &unk_140056978;
+                v39 = unk_140056987;
+                v38 = unk_140056978;
                 goto LABEL_85;
             }
-            v38 = &unk_140056987;
-            v39 = &unk_1400569B1;
-            if (&unk_140056987 == &unk_1400569B1)
+            v38 = unk_140056987;
+            v39 = unk_1400569B1;
+            if (unk_140056987 == unk_1400569B1)
                 goto LABEL_104;
         LABEL_85:
             while (*v38 != v27)

@@ -12,7 +12,7 @@
 #define CURRENT_KTHREAD_PTR 0x188
 #define SystemBigPoolInformation 0x42
 #define SystemModuleInformation 0x0B
-#define STACK_BUF_SIZE 0x1000
+#define STACK_BUF_SIZE 0x2000
 
 #define WINAPI_IMPORT_COUNT 12
 #define _ZwQuerySystemInformationIDX 0
@@ -27,23 +27,6 @@
 #define _PsGetCurrentThreadStackBaseIDX 9
 #define _PsGetCurrentThreadStackLimitIDX 10
 #define _KeAcquireQueuedSpinLockRaiseToSynchIDX 11
-
-typedef void (*GenericFuncPtr)();
-typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
-typedef PVOID(*MmSystemRoutinePtr)(PUNICODE_STRING);
-typedef HANDLE(*PsGetCurrentProcessIdPtr)();
-typedef BOOLEAN(*PsIsSystemThreadPtr)(PETHREAD);
-typedef PEPROCESS(*PsGetCurrentProcessPtr)();
-typedef NTSTATUS(*PsLookupThreadByThreadIdPtr)(_In_ HANDLE ThreadId, _Out_ PETHREAD* Thread);
-typedef PEPROCESS(*IoThreadToProcessPtr)(_In_ PETHREAD Thread);
-typedef HANDLE(*PsGetProcessIdPtr)(_In_ PEPROCESS Process);
-typedef NTSYSAPI PEXCEPTION_ROUTINE(*RtlVirtualUnwindPtr)(_In_ DWORD HandlerType, _In_ DWORD64 ImageBase, _In_ DWORD64 ControlPc, _In_ PRUNTIME_FUNCTION FunctionEntry, _Inout_ PCONTEXT ContextRecord, _Out_ PVOID* HandlerData, _Out_ PDWORD64 EstablisherFrame,_Inout_opt_ /*PKNONVOLATILE_CONTEXT_POINTERS*/PVOID ContextPointers);
-typedef NTSYSAPI PRUNTIME_FUNCTION(*RtlLookupFunctionEntryPtr)(_In_ DWORD64 ControlPc, _Out_ PDWORD64 ImageBase, _Out_ /*PUNWIND_HISTORY_TABLE*/PVOID HistoryTable);
-typedef BOOLEAN(*KeAlertThreadPtr)(IN PKTHREAD Thread, IN KPROCESSOR_MODE AlertMode);
-typedef PVOID(*PsGetCurrentThreadStackBasePtr)();
-typedef PVOID(*PsGetCurrentThreadStackLimitPtr)();
-typedef void(*KeReleaseQueuedSpinLockPtr)(KSPIN_LOCK_QUEUE_NUMBER Number, KIRQL OldIrql);
-typedef KIRQL(*KeAcquireQueuedSpinLockRaiseToSynchPtr)(_In_ KSPIN_LOCK_QUEUE_NUMBER Number);
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
 	union {
@@ -72,13 +55,32 @@ typedef struct _IMAGE_RUNTIME_FUNCTION_ENTRY {
 } RUNTIME_FUNCTION, * PRUNTIME_FUNCTION, _IMAGE_RUNTIME_FUNCTION_ENTRY, * _PIMAGE_RUNTIME_FUNCTION_ENTRY;
 
 typedef struct _STACKWALK_ENTRY {
-	DWORD rip;
+	_QWORD RipValue;
+	_QWORD RspValue;
 } STACKWALK_ENTRY, *PSTACKWALK_ENTRY;
 
 typedef struct _STACKWALK_BUFFER {
+	bool Succeeded = 0;
 	UINT32 EntryCount;
 	STACKWALK_ENTRY Entry[(STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(STACKWALK_ENTRY)];	// (STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(DWORD)
 } STACKWALK_BUFFER, * PSTACKWALK_BUFFER;
+
+typedef void (*GenericFuncPtr)();
+typedef NTSTATUS(*ZwQuerySysInfoPtr)(ULONG, PVOID, ULONG, PULONG);
+typedef PVOID(*MmSystemRoutinePtr)(PUNICODE_STRING);
+typedef HANDLE(*PsGetCurrentProcessIdPtr)();
+typedef BOOLEAN(*PsIsSystemThreadPtr)(PETHREAD);
+typedef PEPROCESS(*PsGetCurrentProcessPtr)();
+typedef NTSTATUS(*PsLookupThreadByThreadIdPtr)(_In_ HANDLE ThreadId, _Out_ PETHREAD* Thread);
+typedef PEPROCESS(*IoThreadToProcessPtr)(_In_ PETHREAD Thread);
+typedef HANDLE(*PsGetProcessIdPtr)(_In_ PEPROCESS Process);
+typedef PEXCEPTION_ROUTINE(*RtlVirtualUnwindPtr)(_In_ DWORD HandlerType, _In_ DWORD64 ImageBase, _In_ DWORD64 ControlPc, _In_ PRUNTIME_FUNCTION FunctionEntry, _Inout_ PCONTEXT ContextRecord, _Out_ PVOID* HandlerData, _Out_ PDWORD64 EstablisherFrame, _Inout_opt_ PVOID ContextPointers);
+typedef PRUNTIME_FUNCTION(*RtlLookupFunctionEntryPtr)(_In_ DWORD64 ControlPc, _Out_ PDWORD64 ImageBase, _Out_ PVOID HistoryTable);
+typedef BOOLEAN(*KeAlertThreadPtr)(IN PKTHREAD Thread, IN KPROCESSOR_MODE AlertMode);
+typedef PVOID(*PsGetCurrentThreadStackBasePtr)();
+typedef PVOID(*PsGetCurrentThreadStackLimitPtr)();
+typedef void(*KeReleaseQueuedSpinLockPtr)(KSPIN_LOCK_QUEUE_NUMBER Number, KIRQL OldIrql);
+typedef KIRQL(*KeAcquireQueuedSpinLockRaiseToSynchPtr)(_In_ KSPIN_LOCK_QUEUE_NUMBER Number);
 
 class Utility
 {
@@ -109,7 +111,7 @@ public:
 	//PKTHREAD KeGetCurrentThread();
 
 	NTSTATUS ScanSystemThreads();
-	size_t CopyThreadKernelStack(_In_ PETHREAD threadObject, __int64 maxSize, void* outStackBuffer, signed int a4);
+	size_t CopyThreadKernelStack(_In_ PETHREAD threadObject,_In_ __int64 maxSize,_Out_ void* outStackBuffer);
 	bool StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
 
 private:

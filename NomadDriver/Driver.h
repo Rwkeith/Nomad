@@ -45,24 +45,24 @@ typedef struct _LDR_DATA_TABLE_ENTRY
 	ULONG TimeDateStamp;
 } LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
 
-typedef struct _SYSTEM_MODULE_ENTRY
-{
-	ULONG  Unused;
-	ULONG  Always0;
-	PVOID  ModuleBaseAddress;
-	ULONG  ModuleSize;
-	ULONG  Unknown;
-	ULONG  ModuleEntryIndex;
-	USHORT ModuleNameLength;
-	USHORT ModuleNameOffset;
-	CHAR   ModuleName[256];
-
-} 	SYSTEM_MODULE_ENTRY, * PSYSTEM_MODULE_ENTRY;
+//typedef struct _SYSTEM_MODULE_ENTRY
+//{
+//	ULONG  Unused;
+//	ULONG  Always0;
+//	PVOID  ModuleBaseAddress;
+//	ULONG  ModuleSize;
+//	ULONG  Unknown;
+//	ULONG  ModuleEntryIndex;
+//	USHORT ModuleNameLength;
+//	USHORT ModuleNameOffset;
+//	CHAR   ModuleName[256];
+//
+//} 	SYSTEM_MODULE_ENTRY, * PSYSTEM_MODULE_ENTRY;
 
 typedef struct _SYSTEM_MODULE_INFORMATION
 {
 	ULONG               	ModulesCount;
-	SYSTEM_MODULE_ENTRY		Modules[0];
+	SYSTEM_MODULE_ENTRY		Modules[1];		// changed from 0...using React OS's def https://doxygen.reactos.org/da/dda/filesystems_2udfs_2Include_2ntddk__ex_8h_source.html#l00087
 
 } 	SYSTEM_MODULE_INFORMATION, * PSYSTEM_MODULE_INFORMATION;
 

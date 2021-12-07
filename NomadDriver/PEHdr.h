@@ -112,14 +112,24 @@ typedef struct _IMAGE_EXPORT_DIRECTORY {
 } IMAGE_EXPORT_DIRECTORY, * PIMAGE_EXPORT_DIRECTORY;
 
 typedef struct _SYSTEM_MODULE_ENTRY {
-	HANDLE Section;
-	PVOID MappedBase;
-	PVOID ImageBase;
-	ULONG ImageSize;
-	ULONG Flags;
-	USHORT LoadOrderIndex;
-	USHORT InitOrderIndex;
-	USHORT LoadCount;
-	USHORT OffsetToFileName;
-	UCHAR FullPathName[256];
-} SYSTEM_MODULE_ENTRY, * PSYSTEM_MODULE_ENTRY;
+	ULONG  Unused;
+	ULONG  Always0;
+	PVOID  ModuleBaseAddress;
+	ULONG  ModuleSize;
+	ULONG  Unknown;
+	ULONG  ModuleEntryIndex;
+	USHORT ModuleNameLength;
+	USHORT ModuleNameOffset;
+	CHAR   ModuleName[256];
+	//HANDLE Section;
+	//PVOID MappedBase;
+	//PVOID ImageBase;
+	//ULONG ImageSize;
+	//ULONG Flags;
+	//USHORT LoadOrderIndex;
+	//USHORT InitOrderIndex;
+	//USHORT LoadCount;
+	//USHORT OffsetToFileName;
+	//UCHAR FullPathName[256];
+} SYSTEM_MODULE_ENTRY, * PSYSTEM_MODULE_ENTRY;		// using https://doxygen.reactos.org/da/dda/filesystems_2udfs_2Include_2ntddk__ex_8h_source.html#l00074
+
