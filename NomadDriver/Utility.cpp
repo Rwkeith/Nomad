@@ -325,32 +325,57 @@ NTSTATUS Utility::QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* da
         return STATUS_UNSUCCESSFUL;
     }
 
-    ULONG size = NULL;
-    NTSTATUS status = pZwQuerySysInfo(infoClass, 0, 0, &size);
-    if (STATUS_INFO_LENGTH_MISMATCH == status) {
-        LogInfo("\tZwQuerySystemInformation data struct size retrieved");
+    if (infoClass == SystemBigPoolInformation)
+    {
+        // https://github.com/ApexLegendsUC/anti-cheat-emulator/blob/9e53bb4a329e0286ff4f237c5ded149d53b0dd56/Source.cpp#L428
+        ULONG len = 4 * 1024 * 1024;
+        ULONG attemptedSize = 0;
+        *dataBuf = ExAllocatePoolWithTag(NonPagedPool, len, POOL_TAG);
+
+        if (!*dataBuf) {
+            LogError("\tInsufficient memory in the free pool to satisfy the request");
+            return STATUS_UNSUCCESSFUL;
+        }
+
+        if (!NT_SUCCESS(pZwQuerySysInfo(infoClass, *dataBuf, len, &attemptedSize)))
+        {
+            LogError("\tZwQuerySystemInformation failed for SystemBigPoolInformation. *dataBuf: %p , len: %d , attemptedSize: %d", *dataBuf, len, attemptedSize);
+            ExFreePoolWithTag(*dataBuf, POOL_TAG);
+            return STATUS_UNSUCCESSFUL;
+        }
+        LogInfo("\tQuerySystemInformation() succeeded for SystemBigPoolInformation.\n");
     }
     else
     {
-        LogError("\tZwQuerySystemInformation, status: %08x", status);
-        return status;
+        ULONG size = NULL;
+        NTSTATUS status = pZwQuerySysInfo(infoClass, 0, 0, &size);
+        if (STATUS_INFO_LENGTH_MISMATCH == status) {
+            LogInfo("\tZwQuerySystemInformation data struct size: %d", size);
+        }
+        else
+        {
+            LogError("\tZwQuerySystemInformation, status: %08x", status);
+            return status;
+        }
+
+        *dataBuf = ExAllocatePoolWithTag(NonPagedPool, size, POOL_TAG);
+
+        if (!*dataBuf) {
+            LogError("\tInsufficient memory in the free pool to satisfy the request");
+            return STATUS_UNSUCCESSFUL;
+        }
+
+        ULONG attemptedSize = 0;
+        if (!NT_SUCCESS(status = pZwQuerySysInfo(infoClass, *dataBuf, size, &attemptedSize))) {
+            LogError("\tZwQuerySystemInformation failed. *dataBuf: %p , size: %d , attemptedSize: %d", *dataBuf, size, attemptedSize);
+            ExFreePoolWithTag(*dataBuf, POOL_TAG);
+            outProcMods = NULL;
+            return status;
+        }
+        LogInfo("\tQuerySystemInformation() succeeded for infoClass: %p\n", infoClass);
     }
 
-    *dataBuf = ExAllocatePool(NonPagedPool, size);
-
-    if (!*dataBuf) {
-        LogError("\tInsufficient memory in the free pool to satisfy the request");
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    if (!NT_SUCCESS(status = pZwQuerySysInfo(infoClass, *dataBuf, size, 0))) {
-        LogError("\tZwQuerySystemInformation failed");
-        ExFreePool(*dataBuf);
-        outProcMods = NULL;
-        return status;
-    }
-
-    LogInfo("\tQuerySystemInformation() succeeded.\n");
+    
     return STATUS_SUCCESS;
 }
 
@@ -419,10 +444,10 @@ NTSTATUS Utility::ScanSystemThreads()
     __int64 result;
     __int64 currentProcessId;
     int isSystemThread;
-    PVOID systemBigPoolInformation;
-    PSYSTEM_MODULE_INFORMATION systemModuleInformation;
+    PVOID systemBigPoolInformation = NULL;
+    PSYSTEM_MODULE_INFORMATION systemModuleInformation = NULL;
     CONTEXT* context;
-    UINT64 currentThreadId;
+    UINT64 currentThreadId = 4;
     UINT64 processID;
     PEPROCESS processObject;
     STACKWALK_ENTRY* entry;
@@ -459,20 +484,20 @@ NTSTATUS Utility::ScanSystemThreads()
         if ((PEPROCESS)result == PsInitialSystemProcess)  // PsInitialSystemProcess is global from ntkrnl
         {
             // Get system big pool info
-            if (!NT_SUCCESS(result = QuerySystemInformation(SystemBigPoolInformation, &systemBigPoolInformation)))
-            {
-                LogError("\tQuerySystemInformation(SystemBigPoolInformation) was unsuccessful 0x%08x\n", result);
-                return result;
-            }
+            //if (!NT_SUCCESS(result = QuerySystemInformation(SystemBigPoolInformation, &systemBigPoolInformation)))
+            //{
+            //    LogError("\tQuerySystemInformation(SystemBigPoolInformation) was unsuccessful 0x%08x\n", result);
+            //    return result;
+            //}
 
             // System != Process module info
-            if (!NT_SUCCESS(result = QuerySystemInformation(SystemModuleInformation, (PVOID*)&result)))
+            if (!NT_SUCCESS(result = QuerySystemInformation(SystemModuleInformation, (PVOID*)&systemModuleInformation)))
             {
                 LogError("\tQuerySystemInformation(SystemModuleInformation) was unsuccessful 0x%08x\n", result);
                 return result;
             }
 
-            systemModuleInformation = (PSYSTEM_MODULE_INFORMATION)result;
+            //systemModuleInformation = (PSYSTEM_MODULE_INFORMATION)result;
             
             if (systemModuleInformation)
             {
@@ -483,6 +508,7 @@ NTSTATUS Utility::ScanSystemThreads()
                     currentThreadId = 4;
                     do
                     {
+                        LogInfo("Scanning thread. currentThreadId: %llu", currentThreadId);
                         status = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
 
                         if (status >= 0)
@@ -525,13 +551,18 @@ NTSTATUS Utility::ScanSystemThreads()
                 }
                 else
                 {
-                    LogError("\tUtility.cpp:418, ExAllocatePool failed\n");
+                    LogError("\tUtility.cpp:%d, ExAllocatePool failed\n", __LINE__);
                     return result;
                 }
                 ExFreePool(systemModuleInformation);
             }
+            else
+            {
+                LogError("\tUtility.cpp:%d, systemModuleInformation == NULL\n", __LINE__);
+                return result;
+            }
             if (systemBigPoolInformation)
-                ExFreePool(systemBigPoolInformation);
+                ExFreePoolWithTag(systemBigPoolInformation, POOL_TAG);
         }
     }
     return result;

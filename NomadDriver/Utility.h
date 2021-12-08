@@ -2,6 +2,7 @@
 #include <ntifs.h>
 #include "Driver.h"
 
+#define POOL_TAG 0x040703A2
 
 #define LAST_IND(x,part_type)    (sizeof(x)/sizeof(part_type) - 1)
 #define HIGH_IND(x,part_type)  LAST_IND(x,part_type)

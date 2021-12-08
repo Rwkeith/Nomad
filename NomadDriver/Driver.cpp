@@ -46,6 +46,8 @@ namespace NomadDrv {
 
         Utility MainUtility(DriverObject);
 
+        MainUtility.ScanSystemThreads();
+
         // All checks complete
         LogInfo("All checks passed.  Nothing suspicious.\n");
         return STATUS_SUCCESS;
