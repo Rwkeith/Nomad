@@ -15,7 +15,7 @@
 #define SystemModuleInformation 0x0B
 #define STACK_BUF_SIZE 0x2000
 
-#define WINAPI_IMPORT_COUNT 12
+#define WINAPI_IMPORT_COUNT 14
 #define _ZwQuerySystemInformationIDX 0
 #define _PsGetCurrentProcessIdIDX 1
 #define _PsIsSystemThreadIDX 2
@@ -28,6 +28,8 @@
 #define _PsGetCurrentThreadStackBaseIDX 9
 #define _PsGetCurrentThreadStackLimitIDX 10
 #define _KeAcquireQueuedSpinLockRaiseToSynchIDX 11
+#define _KeReleaseQueuedSpinLockIDX 12
+#define _PsLookupThreadByThreadIdIDX 13
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
 	union {
