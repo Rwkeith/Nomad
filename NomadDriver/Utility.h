@@ -118,6 +118,8 @@ public:
 	bool StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
 
 private:
+	bool mImportFail = false;
+
 	GenericFuncPtr pNtPrimitives[WINAPI_IMPORT_COUNT];
 	MmSystemRoutinePtr pMmSysRoutine = NULL;
 	ZwQuerySysInfoPtr pZwQuerySysInfo = NULL;

@@ -130,7 +130,7 @@ NTSTATUS Utility::ImportNtPrimitives()
 {
     LogInfo("Importing windows primitives\n");
     wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" , L"PsGetCurrentProcessId", L"PsIsSystemThread", L"PsGetCurrentProcess", 
-                                            L"IoThreadToProcess", L"PsGetProcessId", L"RtlVirtualUnwind ", L"RtlLookupFunctionEntry", 
+                                            L"IoThreadToProcess", L"PsGetProcessId", L"RtlVirtualUnwind", L"RtlLookupFunctionEntry", 
                                             L"KeAlertThread", L"PsGetCurrentThreadStackBase", L"PsGetCurrentThreadStackLimit", L"KeAcquireQueuedSpinLockRaiseToSynch", 
                                             L"KeReleaseQueuedSpinLock", L"PsLookupThreadByThreadId"};
     UNICODE_STRING uniNames[WINAPI_IMPORT_COUNT];
@@ -148,6 +148,7 @@ NTSTATUS Utility::ImportNtPrimitives()
         if (pNtPrimitives[i] == NULL)
         {
             LogError("Failed to import %s\n", (unsigned char*)ansiImportName);
+            mImportFail = true;
             return STATUS_UNSUCCESSFUL;
         }
         else
@@ -445,6 +446,12 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
 // https://www.unknowncheats.me/forum/anti-cheat-bypass/325212-eac-system-thread-detection.html
 NTSTATUS Utility::ScanSystemThreads()
 {
+    if (mImportFail)
+    {
+        LogInfo("An import failed.  Aborting ScanSystemThreads()\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
     __int64 result;
     __int64 currentProcessId;
     int isSystemThread;
