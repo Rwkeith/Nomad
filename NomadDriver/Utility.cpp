@@ -81,11 +81,11 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
     if (outProcMods)
     {
         ExFreePool(outProcMods);
-        outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePool(NonPagedPool, size);
+        outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePoolWithTag(NonPagedPool, size, POOL_TAG);
     }
     else
     {
-        outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePool(NonPagedPool, size);
+        outProcMods = (PRTL_PROCESS_MODULES)ExAllocatePoolWithTag(NonPagedPool, size, POOL_TAG);
     }
         
     if (!outProcMods) {
@@ -95,7 +95,7 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
 
     if (!NT_SUCCESS(status = pZwQuerySysInfo(SYS_MOD_INF, outProcMods, size, 0))) {
         LogError("ZwQuerySystemInformation failed");
-        ExFreePool(outProcMods);
+        ExFreePoolWithTag(outProcMods, POOL_TAG);
         outProcMods = NULL;
         return status;
     }
@@ -322,7 +322,7 @@ PVOID Utility::GetNtoskrnlBaseAddress()
 
 //wrapper for ZwQuerySysInfo
 // for now we want PSYSTEM_BIGPOOL_INFORMATION
-NTSTATUS Utility::QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* dataBuf) /*, 0x100000, 0x2000000) <- ?? */
+NTSTATUS Utility::QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* dataBuf) /*, 0x100000, 0x2000000) <- ?? */
 {
     if (!dataBuf)
     {
@@ -377,7 +377,7 @@ NTSTATUS Utility::QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* da
             outProcMods = NULL;
             return status;
         }
-        LogInfo("\tQuerySystemInformation() succeeded for infoClass: %p\n", infoClass);
+        LogInfo("\tQuerySystemInformation() succeeded for infoClass: %lu\n", infoClass);
     }
 
     
@@ -435,7 +435,7 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
         {
             *sectionVa = ntSection[i].VirtualAddress;
             *sectionSize = ntSection[i].Misc.VirtualSize;
-            LogInfo("Found %s in ntoskrnl.exe at %p , size %04x\n", sectionName, *sectionVa, *sectionSize);
+            LogInfo("Found %s in ntoskrnl.exe at %p , size %lu \n", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
             return true;
         }
     }
@@ -453,36 +453,28 @@ NTSTATUS Utility::ScanSystemThreads()
     }
 
     __int64 result;
-    __int64 currentProcessId;
-    int isSystemThread;
+    BOOLEAN isSystemThread = 0;
+    HANDLE currentProcessId;
     PVOID systemBigPoolInformation = NULL;
     PSYSTEM_MODULE_INFORMATION systemModuleInformation = NULL;
     CONTEXT* context;
     UINT64 currentThreadId = 4;
-    UINT64 processID;
+    HANDLE processID;
     PEPROCESS processObject;
     STACKWALK_ENTRY* entry;
 
     NTSTATUS status;
-    __int64 v10;
-    int entryIndex;
-    __int64 v12;
-    unsigned __int64 v13;
-    int status1;
-    __int64 threadProcessId;
     STACKWALK_BUFFER stackwalkBuffer;
     PETHREAD threadObject;
-    __int64 win32StartAddress;
+
 
     LogInfo("ScanSystemThreads(), Starting routine\n");
-    result = (long long)pPsGetCurrentProcessId();
-    LogInfo("\tpPsGetCurrentProcessId() returned %p\n", result);
-    currentProcessId = result;
+    currentProcessId = pPsGetCurrentProcessId();
+    LogInfo("\tpPsGetCurrentProcessId() returned %p\n", (VOID*)currentProcessId);
     if (pPsIsSystemThread)
     {
-        result = pPsIsSystemThread((PETHREAD)__readgsqword(0x188u));
-        LogInfo("\tpPsIsSystemThread() returned %p\n", result);
-        isSystemThread = (unsigned __int8)result;
+        isSystemThread = pPsIsSystemThread((PETHREAD)__readgsqword(0x188u));
+        LogInfo("\tpPsIsSystemThread() returned %u\n", isSystemThread);
     }
     else
     {
@@ -491,7 +483,7 @@ NTSTATUS Utility::ScanSystemThreads()
     if (isSystemThread)
     {
         result = (long long)pPsGetCurrentProcess();
-        LogInfo("\tpPsGetCurrentProcess() returned %p\n", result);
+        LogInfo("\tpPsGetCurrentProcess() returned %p\n", (VOID*)result);
         if ((PEPROCESS)result == PsInitialSystemProcess)  // PsInitialSystemProcess is global from ntkrnl
         {
             // Get system big pool info
@@ -502,10 +494,10 @@ NTSTATUS Utility::ScanSystemThreads()
             //}
 
             // System != Process module info
-            if (!NT_SUCCESS(result = QuerySystemInformation(SystemModuleInformation, (PVOID*)&systemModuleInformation)))
+            if (!NT_SUCCESS(status = QuerySystemInformation(SystemModuleInformation, (PVOID*)&systemModuleInformation)))
             {
-                LogError("\tQuerySystemInformation(SystemModuleInformation) was unsuccessful 0x%08x\n", result);
-                return result;
+                LogError("\tQuerySystemInformation(SystemModuleInformation) was unsuccessful 0x%08x\n", (long)status);
+                return status;
             }
 
             //systemModuleInformation = (PSYSTEM_MODULE_INFORMATION)result;
@@ -513,7 +505,7 @@ NTSTATUS Utility::ScanSystemThreads()
             if (systemModuleInformation)
             {
                 // allocate memory to store a thread's context
-                context = (CONTEXT*)ExAllocatePool(NonPagedPool, sizeof(CONTEXT));
+                context = (CONTEXT*)ExAllocatePoolWithTag(NonPagedPool, sizeof(CONTEXT), POOL_TAG);
                 if (context)
                 {
                     currentThreadId = 4;
@@ -524,19 +516,19 @@ NTSTATUS Utility::ScanSystemThreads()
 
                         if (status >= 0)
                         {
-                            processObject = pIoThreadToProcess((PETHREAD)threadObject);
+                            processObject = pIoThreadToProcess(threadObject);
 
                             if (!processObject)
                             {
-                                LogError("\tpFailed to get process object, IoThreadToProcess((PETHREAD)threadObject) == NULL, skipping thread ID: %d\n", currentThreadId);
+                                LogError("\tpFailed to get process object, pIoThreadToProcess(threadObject) == NULL, skipping thread ID: %d\n", currentThreadId);
                                 continue;
                             }
 
-                            processID = (UINT64)pPsGetProcessId(processObject);
+                            processID = pPsGetProcessId(processObject);
 
                             if (!processID)
                             {
-                                LogError("\tpFailed to get process id, (UINT64)pPsGetProcessId(currProcessObject) == NULL, skipping thread ID: %d\n", currentThreadId);
+                                LogError("\tpFailed to get process id, pPsGetProcessId(processObject) == NULL, skipping thread ID: %d\n", currentThreadId);
                                 continue;
                             }
 
@@ -563,20 +555,20 @@ NTSTATUS Utility::ScanSystemThreads()
                 else
                 {
                     LogError("\tUtility.cpp:%d, ExAllocatePool failed\n", __LINE__);
-                    return result;
+                    return STATUS_UNSUCCESSFUL;
                 }
                 ExFreePool(systemModuleInformation);
             }
             else
             {
                 LogError("\tUtility.cpp:%d, systemModuleInformation == NULL\n", __LINE__);
-                return result;
+                return STATUS_UNSUCCESSFUL;
             }
             if (systemBigPoolInformation)
                 ExFreePoolWithTag(systemBigPoolInformation, POOL_TAG);
         }
     }
-    return result;
+    return STATUS_SUCCESS;
 }
 
 bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
@@ -1365,6 +1357,7 @@ LABEL_36:
             if (unk_140056987 == unk_1400569B1)
                 goto LABEL_104;
         LABEL_85:
+            // PAGE FAULT HERE
             while (*v38 != v27)
             {
                 v38 += 3;

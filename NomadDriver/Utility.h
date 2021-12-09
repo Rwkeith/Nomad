@@ -7,7 +7,11 @@
 #define LAST_IND(x,part_type)    (sizeof(x)/sizeof(part_type) - 1)
 #define HIGH_IND(x,part_type)  LAST_IND(x,part_type)
 #define LOW_IND(x,part_type)   0
+
+#pragma warning( disable : 4005 )
 #define BYTEn(x, n)   (*((BYTE*)&(x)+n))
+
+#pragma igno
 #define LOBYTE(x)  BYTEn(x,LOW_IND(x,BYTE))
 
 #define CURRENT_KTHREAD_PTR 0x188
@@ -99,7 +103,7 @@ public:
 	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer);
 	PVOID GetNtoskrnlBaseAddress();
 	bool GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sectionSize);
-	NTSTATUS QuerySystemInformation(_In_ INT64 infoClass, _Inout_ PVOID* dataBuf);
+	NTSTATUS QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
 	UINT32 GetThreadStateOffset();
