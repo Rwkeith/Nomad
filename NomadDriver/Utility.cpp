@@ -406,7 +406,7 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
     
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_magic != E_MAGIC)
     {
-        LogInfo("GetNtoskrnlSection() expected MZ header != 0x%02x @ %p", E_MAGIC, kernBase);
+        LogInfo("\t\t\tGetNtoskrnlSection() expected MZ header != 0x%02x @ %p", E_MAGIC, kernBase);
         return FALSE;
     }
 
@@ -415,18 +415,20 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
     // avoid reading a page not paged in
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_lfanew > 0x1000)
     {
-        LogInfo("GetNtoskrnlSection() pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", kernBase);
+        LogInfo("\t\t\tGetNtoskrnlSection() pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", kernBase);
         return FALSE;
     }
 
     if (ntHeader->Signature != NT_HDR_SIG)
     {
-        LogInfo("GetNtoskrnlSection() ntHeader->Signature != 0x%02x @ 0x%p", NT_HDR_SIG, kernBase);
+        LogInfo("\t\t\tGetNtoskrnlSection() ntHeader->Signature != 0x%02x @ 0x%p", NT_HDR_SIG, kernBase);
         return FALSE;
     }
 
-    auto ntSection = reinterpret_cast<PIMAGE_SECTION_HEADER>((BYTE*)ntHeader + sizeof(PIMAGE_NT_HEADERS64));
-    
+    auto ntSection = reinterpret_cast<PIMAGE_SECTION_HEADER>((BYTE*)ntHeader + sizeof(IMAGE_NT_HEADERS64));
+    //LogInfo("\t\t\tntHeader->FileHeader.Machine: 0x%hx", ntHeader->FileHeader.Machine);
+    //LogInfo("\t\t\tntHeader->FileHeader.NumberOfSections: 0x%hx", ntHeader->FileHeader.NumberOfSections);
+
     for (size_t i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
     {
         char* ret = strstr((char*)ntSection[i].Name, sectionName);
@@ -435,15 +437,15 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
         {
             *sectionVa = ntSection[i].VirtualAddress;
             *sectionSize = ntSection[i].Misc.VirtualSize;
-            LogInfo("Found %s in ntoskrnl.exe at %p , size %lu \n", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
+            LogInfo("\t\t\tfound %s in ntoskrnl.exe at %p , size %lu", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
             return true;
         }
-        else
-        {
-            
-        }
+        //else
+        //{
+        //    LogInfo("\t\t\No match, ntSection[%llu] = %p ; ntSection[%llu].Name: %s != %s .  VirtualAddress: 0x%lx ", i, &ntSection[i], i, ntSection[i].Name, sectionName, ntSection[i].VirtualAddress);
+        //}
     }
-    LogInfo("Failed to find %s in ntoskrnl.exe\n", sectionName);
+    LogInfo("\t\t\tfailed to find %s in ntoskrnl.exe", sectionName);
     return false;
 }
 /// EAC's System thread scanning method
@@ -662,21 +664,26 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
                         } while (index < 0x20);
                     }
                 }
-                LogError("Unable to find .text section of ntoskrnl");
-                return 0;
+                else
+                {
+                    LogError("\t\t\tUnable to find .text section of ntoskrnl");
+                    return 0;
+                }
             }
             else
             {
-                LogInfo("\t\tCopyThreadKernelStack() returned copied size: %llu", copiedSize);
+                LogInfo("\t\t\tCopyThreadKernelStack() copiedSize is 0");
+                return 0;
             }
         }
         else
         {
-            LogInfo("\t\tCopyThreadKernelStack() returned copied size: %llu", copiedSize);
+            LogInfo("\t\t\tCopyThreadKernelStack() returned copiedSize: %llu", copiedSize);
+            return 0;
         }
         ExFreePoolWithTag(stackBuffer, POOL_TAG);
     }
-    return status;
+    return 1;
 }
 
 size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, void* outStackBuffer)
