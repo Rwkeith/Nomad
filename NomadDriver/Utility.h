@@ -150,7 +150,7 @@ public:
 	NTSTATUS QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
-	UINT32 GetThreadStateOffset();
+	__int64 GetThreadStateOffset();
 	__int64 GetThreadStackLimit();
 	__int64 GetThreadLockOffset();
 	__int64 SpinLock(volatile signed __int64* Lock);
@@ -159,6 +159,7 @@ public:
 	__int64 GetStackBaseOffset();
 	__int64 LockThread(__int64 Thread, unsigned __int8* Irql);
 	__int64 patternMatcher(unsigned __int8* address, UINT64 outBuffer);
+	__int64 threadStatePatternMatch(unsigned __int8* address, unsigned int **outOffset, int range);
 	//PKTHREAD KeGetCurrentThread();
 
 	NTSTATUS ScanSystemThreads();
@@ -204,6 +205,8 @@ private:
 	PVOID kernBase = NULL;
 
 	PatternContainer patContainer;
+
+	BYTE threadStatePattern[8] = { 0x8a, 0x83, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x05 };		// offset is 0x184 on 1903
 };
 
 

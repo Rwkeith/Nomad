@@ -703,7 +703,7 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     kernelStackOffset = GetKernelStackOffset();
     LogInfo("\t\t\tkernelStackOffset: %llu", kernelStackOffset);
     threadStackBaseOffset = GetStackBaseOffset();
-    LogInfo("\t\t\threadStackBaseOffset: %llu", threadStackBaseOffset);
+    LogInfo("\t\t\tthreadStackBaseOffset: %llu", threadStackBaseOffset);
     
     if (threadObject && threadStackBaseOffset)
         threadStackBase = *(_QWORD*)(threadStackBaseOffset + (BYTE*)threadObject);
@@ -755,6 +755,7 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         if (SharedUserData->NtMajorVersion >= 6 && SharedUserData->NtMajorVersion != 6 || !SharedUserData->NtMinorVersion)  //  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
         {
             threadLockOffset = GetThreadLockOffset();
+            LogInfo("\t\t\tthreadLockOffset: %llu", threadLockOffset);
             BYTE* newthreadLock = (BYTE*)threadObject + threadLockOffset;
             signed __int64 rightExpression = -(signed __int64)(threadLockOffset != 0);
             threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
@@ -787,6 +788,7 @@ __int64 Utility::LockThread(__int64 Thread, unsigned __int8* Irql)
         if (SharedUserData->NtMajorVersion >= 6 && (SharedUserData->NtMajorVersion != 6 || SharedUserData->NtMinorVersion))
         {
             ThreadLockOffset = GetThreadLockOffset();
+            LogInfo("\t\t\tthreadLockOffset: %llu", ThreadLockOffset);
             if (((Thread + ThreadLockOffset) & -(__int64)(ThreadLockOffset != 0)) != 0)
             {
                 CurrentIrql = KeGetCurrentIrql();
@@ -984,17 +986,19 @@ __int64 Utility::GetThreadLockOffset()
     return (unsigned int)gThreadLockOffset;
 }
 
-UINT32 Utility::GetThreadStateOffset()
+__int64 Utility::GetThreadStateOffset()
 {
     UINT64 kThreadStateOffset; // eax
     unsigned __int8* Export; // rax
     unsigned __int8* maxOffset; // rdi
     unsigned __int8* i; // rbx
     UINT64 v6; // edx
-    char outBuf[37];
+    unsigned int* threadStateOffset;
 
+    LogInfo("\t\t\tgSpinLock3: %lld", gSpinLock3);
     if ((unsigned int)SpinLock(&gSpinLock3) == 259)
     {
+        LogInfo("\t\t\tGetThreadStateOffset() acquired SpinLock(gSpinLock3)");
         if (SharedUserData->NtMajorVersion == 6 && SharedUserData->NtMinorVersion == 1)// Windows 7 check
         {
             kThreadStateOffset = 0x164;
@@ -1006,22 +1010,14 @@ UINT32 Utility::GetThreadStateOffset()
             if (Export)
             {
                 maxOffset = Export + 0x132;             // v4 is some offset to v3.  v3 must be a ptr to some struct
-                for (i = &Export[(unsigned int)patternMatcher(Export, (UINT64)outBuf)];
-                    i < maxOffset && (*(WORD*)&outBuf[33] & 0x1000) == 0 && ((outBuf[11] + 62) & 0xF6) != 0;
-                    i += (unsigned int)patternMatcher(i, (UINT64)outBuf))
+                if (threadStatePatternMatch(Export, &threadStateOffset, 0x132))
                 {
-                    if ((outBuf[33] & 1) != 0
-                        && (*(WORD*)&outBuf[33] & 0x100) != 0
-                        && outBuf[11] == -118
-                        && !outBuf[15]
-                        && *(DWORD*)&outBuf[29] < 0x300u)
-                    {
-                        gkThreadStateOffset = *(DWORD*)&outBuf[29];
-                        i += (unsigned int)patternMatcher(i, (UINT64)outBuf);
-                        if ((*(WORD*)&outBuf[33] & 0x1000) == 0 && (outBuf[33] & 4) != 0 && outBuf[11] == 60 && outBuf[21] == 5)
-                            break;
-                        gkThreadStateOffset = 0;
-                    }
+                    LogInfo("\t\t\tthreadStatePatternMatch() found a match at %p with offset value %lu", threadStateOffset, *threadStateOffset);
+                    gkThreadStateOffset = *threadStateOffset;
+                }
+                else
+                {
+                    LogError("\t\t\tthreadStatePatternMatch() failed to find a match.");
                 }
             }
             kThreadStateOffset = gkThreadStateOffset;
@@ -1029,11 +1025,19 @@ UINT32 Utility::GetThreadStateOffset()
         if (kThreadStateOffset)
         {
             v6 = gkThreadStateOffset;
-            if (*(BYTE*)(__readgsqword(0x188u) + kThreadStateOffset) != 2)
+            // we would expect this thread to be in RUNNING STATE, https://doxygen.reactos.org/dd/d83/ndk_2ketypes_8h.html#a89cf35e06b66523904596d9dbdd93af4a7ac9ab6c2e98f6df96b82b175d42747a
+            if (*(BYTE*)((BYTE*)__readgsqword(0x188u) + kThreadStateOffset) != 2)
+            {
+                LogError("\t\t\tGetThreadState(), our thread state was not running based on thread state offset.");
                 v6 = 0;
+            }
             gkThreadStateOffset = v6;
         }
         _InterlockedExchange64(&gSpinLock3, 2);
+    }
+    else
+    {
+        LogError("\t\t\tGetThreadStateOffset() failed to acquire SpinLock(gSpinLock3)");
     }
     return (unsigned int)gkThreadStateOffset;
 }
@@ -1050,6 +1054,7 @@ __int64 Utility::SpinLock(volatile signed __int64* Lock)
     return 0;
 }
 
+// Failing to match for GetThreadStateOffset().
 __int64 Utility::patternMatcher(unsigned __int8* address, UINT64 outBuffer)
 {
     BYTE* v3; // rbx
@@ -1233,7 +1238,7 @@ LABEL_17:
 LABEL_36:
     v19 = *(BYTE*)(outBuffer + 12);
     v20 = v14;
-    bool leftHalf_RightExp = (v15 & *(BYTE*)patContainer.unk_1400567A0 + (currentByte & 3) + (unsigned __int64)*((unsigned __int8*)patContainer.unk_1400567A0 + ((unsigned __int64)(unsigned __int8)currentByte >> 2) + 316) + 316);
+    bool leftHalf_RightExp = ((unsigned __int64)(v15 & *(BYTE*)patContainer.unk_1400567A0 + (currentByte & 3)) + (unsigned __int64)*((unsigned __int8*)patContainer.unk_1400567A0 + ((unsigned __int64)(unsigned __int8)currentByte >> 2) + 316) + 316);
     bool rightExp = leftHalf_RightExp != 0;
     if (v19 && rightExp)
     {
@@ -1550,6 +1555,21 @@ LABEL_146:
     return offsetFromAddress;
 }
 
+__int64 Utility::threadStatePatternMatch(unsigned __int8* address, unsigned int **outOffset, int range)
+{
+    for (BYTE* currByte = address; currByte < (address + range); currByte++)
+    {
+        if (currByte[0] == threadStatePattern[0]
+            && currByte[1] == threadStatePattern[1]
+            && currByte[6] == threadStatePattern[6]
+            && currByte[7] == threadStatePattern[7])
+        {
+            *outOffset = (unsigned int*)((BYTE*)currByte + 2);
+            return true;
+        }
+    }
+    return false;
+}
     /**
      * Checks if an address range lies within a kernel module.
      *
