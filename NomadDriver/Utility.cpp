@@ -430,7 +430,7 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
     for (size_t i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
     {
         char* ret = strstr((char*)ntSection[i].Name, sectionName);
-
+        
         if (ret)
         {
             *sectionVa = ntSection[i].VirtualAddress;
@@ -438,8 +438,12 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
             LogInfo("Found %s in ntoskrnl.exe at %p , size %lu \n", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
             return true;
         }
+        else
+        {
+            
+        }
     }
-    
+    LogInfo("Failed to find %s in ntoskrnl.exe\n", sectionName);
     return false;
 }
 /// EAC's System thread scanning method
@@ -461,7 +465,6 @@ NTSTATUS Utility::ScanSystemThreads()
     UINT64 currentThreadId = 4;
     HANDLE processID;
     PEPROCESS processObject;
-    STACKWALK_ENTRY* entry;
 
     NTSTATUS status;
     STACKWALK_BUFFER stackwalkBuffer;
@@ -511,16 +514,17 @@ NTSTATUS Utility::ScanSystemThreads()
                     currentThreadId = 4;
                     do
                     {
-                        LogInfo("Scanning thread. currentThreadId: %llu", currentThreadId);
+                        
                         status = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
 
-                        if (status >= 0)
+                        if (status == STATUS_SUCCESS)
                         {
+                            LogInfo("\tFound valid thread id: %llx", currentThreadId);
                             processObject = pIoThreadToProcess(threadObject);
 
                             if (!processObject)
                             {
-                                LogError("\tpFailed to get process object, pIoThreadToProcess(threadObject) == NULL, skipping thread ID: %d\n", currentThreadId);
+                                LogError("\tpFailed to get process object, pIoThreadToProcess(threadObject) == NULL, skipping thread ID: %llu\n", currentThreadId);
                                 continue;
                             }
 
@@ -528,27 +532,50 @@ NTSTATUS Utility::ScanSystemThreads()
 
                             if (!processID)
                             {
-                                LogError("\tpFailed to get process id, pPsGetProcessId(processObject) == NULL, skipping thread ID: %d\n", currentThreadId);
+                                LogError("\tpFailed to get process id, pPsGetProcessId(processObject) == NULL, skipping thread ID: %llu\n", currentThreadId);
                                 continue;
                             }
 
-                            if (processID == currentProcessId   // if...the thread's pid is the same as system pid, and threadobject 
-                                && threadObject != (PVOID)__readgsqword(0x188)     // __readgsqword(0x188) == return (struct _KTHREAD *)__readgsqword(0x188) , and thread obj is not our current thread
-                                && StackwalkThread(threadObject, context, &stackwalkBuffer)    // and succesfully walks the stack of thread
-                                && stackwalkBuffer.EntryCount > 0)     // and has more than 1 entry in the stack
+                            if (processID == currentProcessId)                                      // if...the thread's pid is the same as system pid, and threadobject 
                             {
-                                for (size_t i = 0; i < stackwalkBuffer.EntryCount; i++)
+                                if (threadObject != (PVOID)__readgsqword(0x188))                    // __readgsqword(0x188) == return (struct _KTHREAD *)__readgsqword(0x188) , and thread obj is not our current thread
                                 {
-                                    if (!CheckModulesForAddress(stackwalkBuffer.Entry[i].RipValue, systemModuleInformation))
+                                    if (StackwalkThread(threadObject, context, &stackwalkBuffer))   // and succesfully walks the stack of thread
                                     {
-                                        LogInfo("\tSUSPICIOUS THREAD DETECTED\n");
-                                        break;
+                                        if (stackwalkBuffer.EntryCount > 0)                         // and has more than 1 entry in the stack
+                                        {
+                                            LogInfo("\t\tExamining thread stack.....");
+                                            for (size_t i = 0; i < stackwalkBuffer.EntryCount; i++)
+                                            {
+                                                if (!CheckModulesForAddress(stackwalkBuffer.Entry[i].RipValue, systemModuleInformation))
+                                                {
+                                                    LogInfo("\t\tSUSPICIOUS THREAD DETECTED\n");
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        else
+                                        {
+                                            LogInfo("\tAborting thread check:  No entries in thread stack");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        LogInfo("\tAborting thread check:  Unsuccessful StackwalkThread() call");
                                     }
                                 }
+                                else
+                                {
+                                    LogInfo("\tAborting thread check:  Our thread");
+                                }
                             }
-                            ObfDereferenceObject(threadObject); // reference count was incremented on pPsLookupThreadByThreadId
+                            else
+                            {
+                                LogInfo("\tAborting thread check:  Not a System thread");
+                            }
+                            ObfDereferenceObject(threadObject); // reference count was incremented by pPsLookupThreadByThreadId
                         }               
-                        currentThreadId += 4;    // thread id's are multiple of 4
+                        currentThreadId += 4;               // thread id's are multiple of 4
                     } while (currentThreadId < 0x3000);     // lol, brute force method by EAC.  Maybe there's a better way
                     ExFreePool(context);
                 }
@@ -595,7 +622,7 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
     memset(context, 0, sizeof(CONTEXT));
     memset(stackwalkBuffer, 0, 0x208);
     
-    stackBuffer = (_QWORD*)ExAllocatePool(NonPagedPool, STACK_BUF_SIZE);   // sizeof(stackBuffer) == 4096 || 0x1000
+    stackBuffer = (_QWORD*)ExAllocatePoolWithTag(NonPagedPool, STACK_BUF_SIZE, POOL_TAG);   // sizeof(stackBuffer) == 4096 || 0x1000
     if (stackBuffer)
     {
         copiedSize = CopyThreadKernelStack(threadObject, STACK_BUF_SIZE, stackBuffer);
@@ -606,7 +633,7 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
                 if (GetNtoskrnlSection(".text", &sectionVa, &sectionSize))
                 {
                     startRip = stackBuffer[7];
-                    if (startRip >= sectionVa && startRip < sectionSize + sectionVa)
+                    if (startRip >= sectionVa && startRip < (UINT64)sectionSize + sectionVa)
                     {
                         status = 1;
                         context->Rip = startRip;
@@ -638,14 +665,24 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
                 LogError("Unable to find .text section of ntoskrnl");
                 return 0;
             }
+            else
+            {
+                LogInfo("\t\tCopyThreadKernelStack() returned copied size: %llu", copiedSize);
+            }
         }
-        ExFreePool(stackBuffer);
+        else
+        {
+            LogInfo("\t\tCopyThreadKernelStack() returned copied size: %llu", copiedSize);
+        }
+        ExFreePoolWithTag(stackBuffer, POOL_TAG);
     }
     return status;
 }
 
 size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, void* outStackBuffer)
 {
+    UNREFERENCED_PARAMETER(maxSize);
+
     size_t copiedSize;
     size_t threadStateOffset;
     size_t kernelStackOffset;
@@ -656,15 +693,17 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     bool isSystemThread;
     void** pKernelStack; // r12
     __int64 _oldIrql; // rdx
-    size_t threadLockOffset; // eax
+    __int64 threadLockOffset; // eax
     KSPIN_LOCK* threadLock; // rcx
-    unsigned int ThreadPriorityOffset; // rax
     unsigned __int8 oldIrql; // [rsp+50h] [rbp+8h]
 
     copiedSize = 0;
     threadStateOffset = GetThreadStateOffset();
+    LogInfo("\t\t\tthreadStateOffset: %llu", threadStateOffset);
     kernelStackOffset = GetKernelStackOffset();
+    LogInfo("\t\t\tkernelStackOffset: %llu", kernelStackOffset);
     threadStackBaseOffset = GetStackBaseOffset();
+    LogInfo("\t\t\threadStackBaseOffset: %llu", threadStackBaseOffset);
     
     if (threadObject && threadStackBaseOffset)
         threadStackBase = *(_QWORD*)(threadStackBaseOffset + (BYTE*)threadObject);
@@ -672,9 +711,12 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         threadStackBase = 0;
 
     threadStackLimitOffset = GetThreadStackLimit();
-    
+    LogInfo("\t\t\tthreadStackLimitOffset: %llu", threadStackLimitOffset);
     if (!threadObject)
+    {
+        LogError("\t\t\tCopyThreadKernelStack(): threadObject == NULL");
         return 0;
+    }
 
     threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + (BYTE*)threadObject) : 0;
     isSystemThread = pPsIsSystemThread ? (unsigned __int8)pPsIsSystemThread(threadObject) : 0;
@@ -688,6 +730,7 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         || KeGetCurrentIrql() > 1       // read cr8
         || (PKTHREAD)threadObject == KeGetCurrentThread())        //KeGetCurrentThread() is inlined, gs register access.
     {
+        LogInfo("\t\t\tCopyThreadKernelStack() aborted.  Examine checks.");
         return 0;
     }
 
@@ -695,11 +738,13 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     memset(outStackBuffer, 0, 0x2000);
     if (LockThread((__int64)threadObject, (unsigned __int8*)&oldIrql))
     {
+        PHYSICAL_ADDRESS physAddr = MmGetPhysicalAddress(*pKernelStack);
+        
         if (!PsIsThreadTerminating(threadObject)
             && *(BYTE*)(threadStateOffset + (BYTE*)threadObject) == 5
             && (unsigned __int64)*pKernelStack > threadStackLimit
             && (unsigned __int64)*pKernelStack < threadStackBase
-            && *(_QWORD*)&MmGetPhysicalAddress(*pKernelStack))
+            && physAddr.QuadPart)
         {
             copiedSize = threadStackBase - (_QWORD)*pKernelStack;
             if (copiedSize > 0x2000)
@@ -722,18 +767,20 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         else
         {
             LOBYTE(_oldIrql) = oldIrql;
-            KeReleaseQueuedSpinLock(0, _oldIrql);
+            KeReleaseQueuedSpinLock(0, oldIrql);
         }
+    }
+    else
+    {
+        LogError("\t\t\tCopyThreadKernelStack(), LockThread() failed.  Examine.");
     }
     return copiedSize;
 }
 
 __int64 Utility::LockThread(__int64 Thread, unsigned __int8* Irql)
 {
-    char v2; // bl
-    unsigned int ThreadLockOffset; // eax
+    __int64 ThreadLockOffset; // eax
     unsigned __int8 CurrentIrql; // al
-    __int64(__fastcall * Export)(_QWORD); // rax
 
     if (Thread && Irql)
     {
@@ -762,39 +809,38 @@ __int64 Utility::LockThread(__int64 Thread, unsigned __int8* Irql)
 
 __int64 Utility::GetThreadStackLimit()
 {
-    unsigned __int64 thisKThread; // rbx
-    __int64 (*Export)(void); // rax
-    __int64 v2; // rax
+    PETHREAD thisKThread; // rbx
+    unsigned __int64 v2; // rax
     _QWORD* v3; // rcx
 
-    thisKThread = __readgsqword(0x188u);
+    thisKThread = (PETHREAD)__readgsqword(0x188u);
     if ((unsigned int)SpinLock(&gSpinLock6) == 259)
     {
             v2 = (__int64)pPsGetCurrentThreadStackLimit();
             v3 = (_QWORD*)thisKThread;
-            if (thisKThread < thisKThread + 0x2F8)
+            if ((BYTE*)thisKThread < ((BYTE*)thisKThread + 0x2F8))
             {
                 while (*v3 != v2)
                 {
-                    if ((unsigned __int64)++v3 >= thisKThread + 0x2F8)
+                    if ((unsigned __int64)++v3 >= ((UINT64)thisKThread + 0x2F8))
                         goto LABEL_9;
                 }
-                gThreadStackLimit = (DWORD)v3 - thisKThread;
+                gThreadStackLimit = (UINT64)v3 - (UINT64)thisKThread;
             }
     LABEL_9:
         _InterlockedExchange64(&gSpinLock6, 2i64);
     }
-    return (unsigned int)gThreadStackLimit;
+    return gThreadStackLimit;
 }
 
 __int64 Utility::GetKernelStackOffset()
 {
     unsigned __int64 thisThread; // rbx
-    int InitialStackOffset; // ebp
-    unsigned int stackBaseOffset; // eax
+    UINT64 InitialStackOffset; // ebp
+    UINT64 stackBaseOffset; // eax
     unsigned __int64 v3; // rdi
     unsigned __int64 v4; // rsi
-    unsigned int v5; // eax
+    UINT64 v5; // eax
     unsigned __int64* v7; // rax
     bool i; // cf
     _LARGE_INTEGER Interval; // [rsp+40h] [rbp+8h] BYREF
@@ -852,7 +898,6 @@ __int64 Utility::GetKernelStackOffset()
 __int64 Utility::GetInitialStackOffset()
 {
     unsigned __int64 thisKThread; // rbx
-    __int64 (*Export)(void); // rax
     _int64 v2; // rax
     _QWORD* v3; // rcx
 
@@ -878,24 +923,23 @@ __int64 Utility::GetInitialStackOffset()
 
 __int64 Utility::GetStackBaseOffset()
 {
-    unsigned __int64 thiskThread; // rbx
-    __int64 (*Export)(void); // rax
+    PETHREAD thiskThread; // rbx
     __int64 stackBase; // rax
     _QWORD* v3; // rcx
 
-    thiskThread = __readgsqword(0x188);
+    thiskThread = (PETHREAD)__readgsqword(0x188);
     if ((unsigned int)SpinLock(&gSpinLock5) == 259)
     {
         stackBase = (__int64)pPsGetCurrentThreadStackBase();
         v3 = (_QWORD*)thiskThread;
-        if (thiskThread < thiskThread + 0x2F8)
+        if ((UINT64)thiskThread < ((UINT64)thiskThread + 0x2F8))
         {
             while (*v3 != stackBase)
             {
-                if ((unsigned __int64)++v3 >= thiskThread + 0x2F8)
+                if ((unsigned __int64)++v3 >= (UINT64)thiskThread + 0x2F8)
                     goto LABEL_9;
             }
-            gStackBaseOffset = (DWORD)v3 - thiskThread;
+            gStackBaseOffset = (UINT64)v3 - (UINT64)thiskThread;
         }
     LABEL_9:
         _InterlockedExchange64(&gSpinLock5, 2);
@@ -916,9 +960,9 @@ __int64 Utility::GetThreadLockOffset()
         if (Export)
         {
             maxOffset = Export + 0xF1;
-            for (addrOffset = &Export[(unsigned int)patternMatcher(Export, (__int64)outBuf)];// (unsigned int)patternMatcher(Export, (__int64)outBuf) returns address offset
+            for (addrOffset = &Export[(unsigned int)patternMatcher(Export, (UINT64)outBuf)];// (unsigned int)patternMatcher(Export, (__int64)outBuf) returns address offset
                 addrOffset < maxOffset && (*(WORD*)&outBuf[33] & 0x1000) == 0;
-                addrOffset += (unsigned int)patternMatcher(addrOffset, (__int64)outBuf))
+                addrOffset += (unsigned int)patternMatcher(addrOffset, (UINT64)outBuf))
             {
                 if ((*(DWORD*)&outBuf[33] & 0x40000000) != 0
                     && (*(DWORD*)&outBuf[33] & 0x10000000) != 0
@@ -942,11 +986,11 @@ __int64 Utility::GetThreadLockOffset()
 
 UINT32 Utility::GetThreadStateOffset()
 {
-    unsigned int kThreadStateOffset; // eax
+    UINT64 kThreadStateOffset; // eax
     unsigned __int8* Export; // rax
     unsigned __int8* maxOffset; // rdi
     unsigned __int8* i; // rbx
-    int v6; // edx
+    UINT64 v6; // edx
     char outBuf[37];
 
     if ((unsigned int)SpinLock(&gSpinLock3) == 259)
@@ -962,9 +1006,9 @@ UINT32 Utility::GetThreadStateOffset()
             if (Export)
             {
                 maxOffset = Export + 0x132;             // v4 is some offset to v3.  v3 must be a ptr to some struct
-                for (i = &Export[(unsigned int)patternMatcher(Export, (__int64)outBuf)];
+                for (i = &Export[(unsigned int)patternMatcher(Export, (UINT64)outBuf)];
                     i < maxOffset && (*(WORD*)&outBuf[33] & 0x1000) == 0 && ((outBuf[11] + 62) & 0xF6) != 0;
-                    i += (unsigned int)patternMatcher(i, (__int64)outBuf))
+                    i += (unsigned int)patternMatcher(i, (UINT64)outBuf))
                 {
                     if ((outBuf[33] & 1) != 0
                         && (*(WORD*)&outBuf[33] & 0x100) != 0
@@ -973,7 +1017,7 @@ UINT32 Utility::GetThreadStateOffset()
                         && *(DWORD*)&outBuf[29] < 0x300u)
                     {
                         gkThreadStateOffset = *(DWORD*)&outBuf[29];
-                        i += (unsigned int)patternMatcher(i, (__int64)outBuf);
+                        i += (unsigned int)patternMatcher(i, (UINT64)outBuf);
                         if ((*(WORD*)&outBuf[33] & 0x1000) == 0 && (outBuf[33] & 4) != 0 && outBuf[11] == 60 && outBuf[21] == 5)
                             break;
                         gkThreadStateOffset = 0;
@@ -1006,7 +1050,7 @@ __int64 Utility::SpinLock(volatile signed __int64* Lock)
     return 0;
 }
 
-__int64 Utility::patternMatcher(unsigned __int8* address, __int64 outBuffer)
+__int64 Utility::patternMatcher(unsigned __int8* address, UINT64 outBuffer)
 {
     BYTE* v3; // rbx
     char v4; // r14
@@ -1065,44 +1109,10 @@ __int64 Utility::patternMatcher(unsigned __int8* address, __int64 outBuffer)
     unsigned __int8 v58; // [rsp+70h] [rbp+18h]
     char v59; // [rsp+78h] [rbp+20h]
 
-    BYTE unk_1400567A0[] = { 0xA5, 0xAA, 0xA5, 0xB8, 0xA5, 0xAA, 0xA5, 0xAA, 0xA5, 0xB8, 0xA5, 0xB8, 0xA5, 0xB8, 0xA5, 0xB8, 0xC0, 0xC0, 0xC0, 
-                                0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xAC, 0xC0, 0xCC, 0xC0, 0xA1, 0xA1, 0xA1, 0xA1, 0xB1, 0xA5, 0xA5, 0xA6, 0xC0, 0xC0, 
-                                0xD7, 0xDA, 0xE0, 0xC0, 0xE4, 0xC0, 0xEA, 0xEA, 0xE0, 0xE0, 0x98, 0xC8, 0xEE, 0xF1, 0xA5, 0xD3, 0xA5, 0xA5, 0xA1, 
-                                0xEA, 0x9E, 0xC0, 0xC0, 0xC2, 0xC0, 0xE6, 0x03, 0x7F, 0x11, 0x7F, 0x01, 0x7F, 0x01, 0x3F, 0x01, 0x01 };
-
-    BYTE unk_1400567EA[] = { 0xAB, 0x8B, 0x90, 0x64, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x92, 0x5B, 0x5B, 0x76, 0x90, 0x92, 0x92, 0x5B, 0x5B, 0x5B,
-                                0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x6A, 0x73, 0x90, 0x5B, 0x52, 0x52, 0x52, 0x52, 0x5B, 0x5B,
-                                0x5B, 0x5B, 0x77, 0x7C, 0x77, 0x85, 0x5B, 0x5B, 0x70, 0x5B, 0x7A, 0xAF, 0x76, 0x76, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B,
-                                0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x86, 0x01, 0x03, 0x01, 0x04, 0x03, 0xD5, 0x03, 0xD5, 0x03, 0xCC, 0x01, 0xBC,
-                                0x03, 0xF0, 0x03, 0x03, 0x04, 0x00, 0x50, 0x50, 0x50, 0x50, 0xFF, 0x20, 0x20, 0x20, 0x20, 0x01, 0x01, 0x01, 0x01,
-                                0xC4, 0x02, 0x10, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x03, 0x11, 0xFF, 0x03, 0xC4, 0xC6, 0xC8, 0x02, 0x10, 0x00, 0xFF,
-                                0xCC, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x03, 0x01, 0xFF, 0xFF, 0xC0, 0xC2, 0x10, 0x11, 0x02,
-                                0x03, 0x01, 0x01, 0x01, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x10, 0x10,
-                                0x10, 0x10, 0x02, 0x10, 0x00, 0x00, 0xC6, 0xC8, 0x02, 0x02, 0x02, 0x02, 0x06, 0x00, 0x04, 0x00, 0x02, 0xFF, 0x00,
-                                0xC0, 0xC2, 0x01, 0x01, 0x03, 0x03, 0x03, 0xCA, 0x40, 0x00, 0x0A, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x7F, 0x00,
-                                0x33, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xBF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00,
-                                0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
-                                0x00, 0xBF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7F, 0x00, 0x00, 0xFF, 0x40, 0x40, 0x40, 0x40, 0x41,
-                                0x49, 0x40, 0x40, 0x40, 0x40, 0x4C, 0x42, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x4F, 0x44, 0x53, 0x40,
-                                0x40, 0x40, 0x44, 0x57, 0x43, 0x5C, 0x40, 0x60, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
-                                0x40, 0x40, 0x40, 0x64, 0x66, 0x6E, 0x6B, 0x40, 0x40, 0x6A, 0x46, 0x40, 0x40, 0x44, 0x46, 0x40, 0x40, 0x5B, 0x44,
-                                0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x06, 0x06, 0x06, 0x06, 0x01, 0x06, 0x06, 0x02, 0x06, 0x06, 0x00, 0x06, 0x00,
-                                0x0A, 0x0A, 0x00, 0x00, 0x00, 0x02, 0x07, 0x07, 0x06, 0x02, 0x0D, 0x06, 0x06, 0x06, 0x0E, 0x05, 0x05, 0x02, 0x02,
-                                0x00, 0x00, 0x04, 0x04, 0x04, 0x04, 0x05, 0x06, 0x06, 0x06, 0x00, 0x00, 0x00, 0x0E };
-
-    BYTE unk_140056978[] = { 0x62, 0xFF, 0x00, 0x8D, 0xFF, 0x00, 0xC4, 0xFF, 0x00, 0xC5, 0xFF, 0x00, 0xFF, 0xFF, 0xEB };
-
-    BYTE unk_140056966[] = { 0xAB,0x00,0xB0,0x00,0xB1,0x00,0xB3,0x00,0xBA,0xF8,0xBB,0x00,0xC0,0x00,0xC1,0x00,0xC7,0xBF };
-
-    BYTE unk_14005694E[] = { 0x00, 0x00, 0x08, 0x00, 0x10, 0x00, 0x18, 0x00, 0x20, 0x00, 0x28, 0x00, 0x30, 0x00, 0x80, 0x01, 0x82, 0x01, 0x86, 0x00, 0xF6, 0xCF, 0xFE, 0x3F };
-
-    BYTE unk_140056987[] = { 0x01, 0xFF, 0x0E, 0x12, 0x08, 0x00, 0x13, 0x09, 0x00, 0x16, 0x08, 0x00, 0x17, 0x09, 0x00, 0x2B, 0x09, 0x00, 0xAE, 0xFF, 0x07, 0xB2, 0xFF, 0x00, 0xB4, 0xFF, 0x00, 0xB5, 0xFF, 0x00, 0xC3, 0x01, 0x00, 0xC7, 0xFF, 0xBF, 0xE7, 0x08, 0x00, 0xF0, 0x02, 0x00 };
-
-    BYTE unk_1400569B1[] = { 0x0,0x0,0x0,0x0,0x0,0x0,0x0 };
 
 
     localAddr = (char)address;
-    v3 = unk_1400567A0;
+    v3 = patContainer.unk_1400567A0;
     v4 = 0;
     v5 = 0;
     v55 = 0;
@@ -1186,7 +1196,7 @@ LABEL_17:
     if ((BYTE)currentByte == 15)
     {
         LOBYTE(currentByte) = *_localAddress;
-        v3 = unk_1400567EA;
+        v3 = patContainer.unk_1400567EA;
         *(BYTE*)(outBuffer + 12) = *_localAddress++;
     }
     else if ((unsigned __int8)currentByte >= 0xA0u && (unsigned __int8)currentByte <= 0xA3u)
@@ -1223,7 +1233,7 @@ LABEL_17:
 LABEL_36:
     v19 = *(BYTE*)(outBuffer + 12);
     v20 = v14;
-    bool leftHalf_RightExp = (v15 & *(BYTE*)unk_1400567A0 + (currentByte & 3) + (unsigned __int64)*((unsigned __int8*)unk_1400567A0 + ((unsigned __int64)(unsigned __int8)currentByte >> 2) + 316) + 316);
+    bool leftHalf_RightExp = (v15 & *(BYTE*)patContainer.unk_1400567A0 + (currentByte & 3) + (unsigned __int64)*((unsigned __int8*)patContainer.unk_1400567A0 + ((unsigned __int64)(unsigned __int8)currentByte >> 2) + 316) + 316);
     bool rightExp = leftHalf_RightExp != 0;
     if (v19 && rightExp)
     {
@@ -1263,12 +1273,12 @@ LABEL_36:
             if (v24 == 3)
             {
                 v31 = v58;
-                v32 = *((BYTE*)unk_1400567A0 + 8 * v30 + v26 + 260);
+                v32 = *((BYTE*)patContainer.unk_1400567A0 + 8 * v30 + v26 + 260);
             }
             else
             {
                 v31 = v26;
-                v32 = *((BYTE*)unk_1400567A0 + v30 + 253);
+                v32 = *((BYTE*)patContainer.unk_1400567A0 + v30 + 253);
             }
             v28 = v22;
             v33 = ((v32 << v31) & 0x80u) != 0;
@@ -1291,12 +1301,12 @@ LABEL_36:
                 v35 = v27;
                 if (!v19)
                     v35 = v27 & 0xFE;
-                v36 = unk_140056978;
+                v36 = patContainer.unk_140056978;
                 if (!v19)
-                    v36 = unk_140056966;
-                v37 = unk_140056966;
+                    v36 = patContainer.unk_140056966;
+                v37 = patContainer.unk_140056966;
                 if (!v19)
-                    v37 = unk_14005694E;
+                    v37 = patContainer.unk_14005694E;
                 while (v37 != v36)
                 {
                     if (*v37 == v35)
@@ -1348,13 +1358,13 @@ LABEL_36:
         {
             if (!v19)
             {
-                v39 = unk_140056987;
-                v38 = unk_140056978;
+                v39 = patContainer.unk_140056987;
+                v38 = patContainer.unk_140056978;
                 goto LABEL_85;
             }
-            v38 = unk_140056987;
-            v39 = unk_1400569B1;
-            if (unk_140056987 == unk_1400569B1)
+            v38 = patContainer.unk_140056987;
+            v39 = patContainer.unk_1400569B1;
+            if (patContainer.unk_140056987 == patContainer.unk_1400569B1)
                 goto LABEL_104;
         LABEL_85:
             // PAGE FAULT HERE
