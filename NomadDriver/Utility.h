@@ -157,9 +157,10 @@ public:
 	__int64 GetKernelStackOffset();
 	__int64 GetInitialStackOffset();
 	__int64 GetStackBaseOffset();
-	__int64 LockThread(__int64 Thread, unsigned __int8* Irql);
+	__int64 LockThread(_In_ __int64 Thread, _Out_ unsigned __int8* Irql);
 	__int64 patternMatcher(unsigned __int8* address, UINT64 outBuffer);
 	__int64 threadStatePatternMatch(unsigned __int8* address, unsigned int **outOffset, int range);
+	__int64 threadLockPatternMatch(unsigned __int8* address, unsigned __int8** outOffset, int range);
 	//PKTHREAD KeGetCurrentThread();
 
 	NTSTATUS ScanSystemThreads();
@@ -207,6 +208,7 @@ private:
 	PatternContainer patContainer;
 
 	BYTE threadStatePattern[8] = { 0x8a, 0x83, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x05 };		// offset is 0x184 on 1903
+	BYTE threadLockPattern[8] = {0xF0, 0x48, 0x0F, 0xBA, 0x6B, 0x00, 0x00, 0x0F};
 };
 
 

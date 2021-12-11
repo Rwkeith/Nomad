@@ -519,12 +519,12 @@ NTSTATUS Utility::ScanSystemThreads()
 
                         if (status == STATUS_SUCCESS)
                         {
-                            LogInfo("\tFound valid thread id: %llx", currentThreadId);
+                            LogInfo("\tFound valid thread id: 0x%llx (%llu)", currentThreadId, currentThreadId);
                             processObject = pIoThreadToProcess(threadObject);
 
                             if (!processObject)
                             {
-                                LogError("\tpFailed to get process object, pIoThreadToProcess(threadObject) == NULL, skipping thread ID: %llu\n", currentThreadId);
+                                LogError("\t\tpFailed to get process object, pIoThreadToProcess(threadObject) == NULL, skipping thread ID: %llu\n", currentThreadId);
                                 continue;
                             }
 
@@ -532,7 +532,7 @@ NTSTATUS Utility::ScanSystemThreads()
 
                             if (!processID)
                             {
-                                LogError("\tpFailed to get process id, pPsGetProcessId(processObject) == NULL, skipping thread ID: %llu\n", currentThreadId);
+                                LogError("\t\tAborting thread check:  Failed to get process id, pPsGetProcessId(processObject) == NULL\n");
                                 continue;
                             }
 
@@ -549,29 +549,29 @@ NTSTATUS Utility::ScanSystemThreads()
                                             {
                                                 if (!CheckModulesForAddress(stackwalkBuffer.Entry[i].RipValue, systemModuleInformation))
                                                 {
-                                                    LogInfo("\t\tSUSPICIOUS THREAD DETECTED\n");
+                                                    LogInfo("\t\t\tSUSPICIOUS THREAD DETECTED\n");
                                                     break;
                                                 }
                                             }
                                         }
                                         else
                                         {
-                                            LogInfo("\tAborting thread check:  No entries in thread stack");
+                                            LogInfo("\t\tAborting thread check:  No entries in thread stack");
                                         }
                                     }
                                     else
                                     {
-                                        LogInfo("\tAborting thread check:  Unsuccessful StackwalkThread() call");
+                                        LogInfo("\t\tAborting thread check:  Unsuccessful StackwalkThread() call");
                                     }
                                 }
                                 else
                                 {
-                                    LogInfo("\tAborting thread check:  Our thread");
+                                    LogInfo("\t\tAborting thread check:  Our thread");
                                 }
                             }
                             else
                             {
-                                LogInfo("\tAborting thread check:  Not a System thread");
+                                LogInfo("\t\tAborting thread check:  Not a System thread");
                             }
                             ObfDereferenceObject(threadObject); // reference count was incremented by pPsLookupThreadByThreadId
                         }               
@@ -581,14 +581,14 @@ NTSTATUS Utility::ScanSystemThreads()
                 }
                 else
                 {
-                    LogError("\tUtility.cpp:%d, ExAllocatePool failed\n", __LINE__);
+                    LogError("\t\tUtility.cpp:%d, ExAllocatePool failed\n", __LINE__);
                     return STATUS_UNSUCCESSFUL;
                 }
                 ExFreePool(systemModuleInformation);
             }
             else
             {
-                LogError("\tUtility.cpp:%d, systemModuleInformation == NULL\n", __LINE__);
+                LogError("\t\tUtility.cpp:%d, systemModuleInformation == NULL\n", __LINE__);
                 return STATUS_UNSUCCESSFUL;
             }
             if (systemBigPoolInformation)
@@ -600,19 +600,19 @@ NTSTATUS Utility::ScanSystemThreads()
 
 bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
 {
-    char status; // di
-    _QWORD* stackBuffer; // rax MAPDST
-    size_t copiedSize; // rax
-    DWORD64 startRip; // rdx
-    unsigned int index; // ebp
-    unsigned __int64 rip0; // rcx
-    DWORD64 rsp0; // rdx
-    PRUNTIME_FUNCTION functionTableEntry; // rax
-    __int64 moduleBase; // [rsp+40h] [rbp-48h]
-    __int64 v17; // [rsp+48h] [rbp-40h]
-    __int64 v18; // [rsp+50h] [rbp-38h]
-    DWORD sectionVa; // [rsp+90h] [rbp+8h]
-    DWORD sectionSize; // [rsp+A8h] [rbp+20h]
+    char status;
+    _QWORD* stackBuffer;
+    size_t copiedSize;
+    DWORD64 startRip;
+    unsigned int index;
+    unsigned __int64 rip0;
+    DWORD64 rsp0;
+    PRUNTIME_FUNCTION functionTableEntry;
+    __int64 moduleBase;
+    __int64 v17;
+    __int64 v18;
+    DWORD sectionVa;
+    DWORD sectionSize;
 
     status = 0;
     if (!threadObject)
@@ -699,11 +699,11 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
 
     copiedSize = 0;
     threadStateOffset = GetThreadStateOffset();
-    LogInfo("\t\t\tthreadStateOffset: %llu", threadStateOffset);
+    LogInfo("\t\t\tthreadStateOffset: 0x%llx", threadStateOffset);
     kernelStackOffset = GetKernelStackOffset();
-    LogInfo("\t\t\tkernelStackOffset: %llu", kernelStackOffset);
+    LogInfo("\t\t\tkernelStackOffset: 0x%llx", kernelStackOffset);
     threadStackBaseOffset = GetStackBaseOffset();
-    LogInfo("\t\t\tthreadStackBaseOffset: %llu", threadStackBaseOffset);
+    LogInfo("\t\t\tthreadStackBaseOffset: 0x%llx", threadStackBaseOffset);
     
     if (threadObject && threadStackBaseOffset)
         threadStackBase = *(_QWORD*)(threadStackBaseOffset + (BYTE*)threadObject);
@@ -711,7 +711,7 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         threadStackBase = 0;
 
     threadStackLimitOffset = GetThreadStackLimit();
-    LogInfo("\t\t\tthreadStackLimitOffset: %llu", threadStackLimitOffset);
+    LogInfo("\t\t\tthreadStackLimitOffset: 0x%llx", threadStackLimitOffset);
     if (!threadObject)
     {
         LogError("\t\t\tCopyThreadKernelStack(): threadObject == NULL");
@@ -755,7 +755,7 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
         if (SharedUserData->NtMajorVersion >= 6 && SharedUserData->NtMajorVersion != 6 || !SharedUserData->NtMinorVersion)  //  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
         {
             threadLockOffset = GetThreadLockOffset();
-            LogInfo("\t\t\tthreadLockOffset: %llu", threadLockOffset);
+            LogInfo("\t\t\tthreadLockOffset: 0x%llx", threadLockOffset);
             BYTE* newthreadLock = (BYTE*)threadObject + threadLockOffset;
             signed __int64 rightExpression = -(signed __int64)(threadLockOffset != 0);
             threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
@@ -778,23 +778,26 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     return copiedSize;
 }
 
-__int64 Utility::LockThread(__int64 Thread, unsigned __int8* Irql)
+__int64 Utility::LockThread(_In_ __int64 Thread, _Out_ unsigned __int8* Irql)
 {
-    __int64 ThreadLockOffset; // eax
-    unsigned __int8 CurrentIrql; // al
+    __int64 ThreadLockOffset;
+    unsigned __int8 CurrentIrql;
+    KSPIN_LOCK* threadLock;
 
     if (Thread && Irql)
     {
         if (SharedUserData->NtMajorVersion >= 6 && (SharedUserData->NtMajorVersion != 6 || SharedUserData->NtMinorVersion))
         {
             ThreadLockOffset = GetThreadLockOffset();
-            LogInfo("\t\t\tthreadLockOffset: %llu", ThreadLockOffset);
             if (((Thread + ThreadLockOffset) & -(__int64)(ThreadLockOffset != 0)) != 0)
             {
                 CurrentIrql = KeGetCurrentIrql();
                 __writecr8(0xC);
                 *Irql = CurrentIrql;
-                ((void (*)(void))KeAcquireSpinLockAtDpcLevel)();
+                BYTE* newthreadLock = (BYTE*)Thread + ThreadLockOffset;
+                signed __int64 rightExpression = -(signed __int64)(ThreadLockOffset != 0);
+                threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
+                KeAcquireSpinLockAtDpcLevel(threadLock);
                 return 1;
             }
             return 0;
@@ -951,10 +954,10 @@ __int64 Utility::GetStackBaseOffset()
 
 __int64 Utility::GetThreadLockOffset()
 {
-    unsigned __int8* Export; // rax
-    unsigned __int8* maxOffset; // rdi
-    unsigned __int8* addrOffset; // rbx
-    char outBuf[37]; // [rsp+20h] [rbp-38h] BYREF
+    unsigned __int8* Export;
+    unsigned __int8* maxOffset;
+    unsigned __int8* addrOffset;
+    unsigned __int8* threadLockOffset;
 
     if ((unsigned int)SpinLock(&gSpinLock1) == 259)
     {
@@ -962,43 +965,34 @@ __int64 Utility::GetThreadLockOffset()
         if (Export)
         {
             maxOffset = Export + 0xF1;
-            for (addrOffset = &Export[(unsigned int)patternMatcher(Export, (UINT64)outBuf)];// (unsigned int)patternMatcher(Export, (__int64)outBuf) returns address offset
-                addrOffset < maxOffset && (*(WORD*)&outBuf[33] & 0x1000) == 0;
-                addrOffset += (unsigned int)patternMatcher(addrOffset, (UINT64)outBuf))
+            if (threadLockPatternMatch(Export, &threadLockOffset, 0xF1))
             {
-                if ((*(DWORD*)&outBuf[33] & 0x40000000) != 0
-                    && (*(DWORD*)&outBuf[33] & 0x10000000) != 0
-                    && (outBuf[33] & 1) != 0
-                    && (outBuf[33] & 0x40) != 0
-                    && (outBuf[33] & 4) != 0
-                    && !outBuf[21]
-                    && outBuf[7]
-                    && outBuf[11] == 15
-                    && outBuf[12] == -70)
-                {
-                    gThreadLockOffset = (unsigned __int8)outBuf[29];
-                    break;
-                }
+                LogInfo("\t\t\tthreadLockPatternMatch() found a match at %p with offset value %lu", threadLockOffset, *threadLockOffset);
+                gThreadLockOffset = (unsigned __int8)*threadLockOffset;
+            }
+            else
+            {
+                LogInfo("\t\t\tthreadLockPatternMatch() failed to find a match");
+                gThreadLockOffset = 0;
             }
         }
+        // Acquire the lock so we only search for the offset once
         _InterlockedExchange64(&gSpinLock1, 2);
     }
-    return (unsigned int)gThreadLockOffset;
+    return gThreadLockOffset;
 }
 
 __int64 Utility::GetThreadStateOffset()
 {
-    UINT64 kThreadStateOffset; // eax
-    unsigned __int8* Export; // rax
-    unsigned __int8* maxOffset; // rdi
-    unsigned __int8* i; // rbx
-    UINT64 v6; // edx
+    UINT64 kThreadStateOffset;
+    unsigned __int8* Export;
+    unsigned __int8* maxOffset;
+    unsigned __int8* i;
+    UINT64 v6;
     unsigned int* threadStateOffset;
 
-    LogInfo("\t\t\tgSpinLock3: %lld", gSpinLock3);
     if ((unsigned int)SpinLock(&gSpinLock3) == 259)
     {
-        LogInfo("\t\t\tGetThreadStateOffset() acquired SpinLock(gSpinLock3)");
         if (SharedUserData->NtMajorVersion == 6 && SharedUserData->NtMinorVersion == 1)// Windows 7 check
         {
             kThreadStateOffset = 0x164;
@@ -1017,7 +1011,7 @@ __int64 Utility::GetThreadStateOffset()
                 }
                 else
                 {
-                    LogError("\t\t\tthreadStatePatternMatch() failed to find a match.");
+                    LogError("\t\t\tthreadStatePatternMatch() failed to find a match");
                 }
             }
             kThreadStateOffset = gkThreadStateOffset;
@@ -1035,10 +1029,6 @@ __int64 Utility::GetThreadStateOffset()
         }
         _InterlockedExchange64(&gSpinLock3, 2);
     }
-    else
-    {
-        LogError("\t\t\tGetThreadStateOffset() failed to acquire SpinLock(gSpinLock3)");
-    }
     return (unsigned int)gkThreadStateOffset;
 }
 
@@ -1054,7 +1044,7 @@ __int64 Utility::SpinLock(volatile signed __int64* Lock)
     return 0;
 }
 
-// Failing to match for GetThreadStateOffset().
+// Failing to match for GetThreadStateOffset, GetThreadLockOffset
 __int64 Utility::patternMatcher(unsigned __int8* address, UINT64 outBuffer)
 {
     BYTE* v3; // rbx
@@ -1553,6 +1543,25 @@ LABEL_146:
         *(BYTE*)outBuffer = 15;
     }
     return offsetFromAddress;
+}
+
+__int64 Utility::threadLockPatternMatch(unsigned __int8* address, unsigned __int8** outOffset, int range)
+{
+    for (BYTE* currByte = address; currByte < (address + range); currByte++)
+    {
+        if (currByte[0] == threadLockPattern[0]
+            && currByte[1] == threadLockPattern[1]
+            && currByte[2] == threadLockPattern[2]
+            && currByte[3] == threadLockPattern[3]
+            && currByte[4] == threadLockPattern[4]
+            && currByte[6] == threadLockPattern[6]
+            && currByte[7] == threadLockPattern[7])
+        {
+            *outOffset = (unsigned __int8*)((BYTE*)currByte + 5);
+            return true;
+        }
+    }
+    return false;
 }
 
 __int64 Utility::threadStatePatternMatch(unsigned __int8* address, unsigned int **outOffset, int range)
