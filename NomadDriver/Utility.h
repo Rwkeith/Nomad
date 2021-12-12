@@ -35,6 +35,9 @@
 #define _KeReleaseQueuedSpinLockIDX 12
 #define _PsLookupThreadByThreadIdIDX 13
 
+#define SUCCESS 1
+#define FAIL 0
+
 
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
@@ -142,7 +145,7 @@ public:
 	NTSTATUS EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods);
 	NTSTATUS ImportNtPrimitives();
 	bool IsValidPEHeader(_In_ const uintptr_t head);
-	bool CheckModulesForAddress(UINT64 address, PSYSTEM_MODULE_INFORMATION procMods);
+	bool CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods);
 	PVOID GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject);
 	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer);
 	PVOID GetNtoskrnlBaseAddress();
@@ -157,14 +160,14 @@ public:
 	__int64 GetKernelStackOffset();
 	__int64 GetInitialStackOffset();
 	__int64 GetStackBaseOffset();
-	__int64 LockThread(_In_ __int64 Thread, _Out_ unsigned __int8* Irql);
+	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql);
 	__int64 patternMatcher(unsigned __int8* address, UINT64 outBuffer);
 	__int64 threadStatePatternMatch(unsigned __int8* address, unsigned int **outOffset, int range);
 	__int64 threadLockPatternMatch(unsigned __int8* address, unsigned __int8** outOffset, int range);
 	//PKTHREAD KeGetCurrentThread();
 
 	NTSTATUS ScanSystemThreads();
-	size_t CopyThreadKernelStack(_In_ PETHREAD threadObject,_In_ __int64 maxSize,_Out_ void* outStackBuffer);
+	UINT64 CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer);
 	bool StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
 
 private:

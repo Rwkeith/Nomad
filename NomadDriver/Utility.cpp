@@ -105,7 +105,6 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
         *procMods = outProcMods;
     }
 
-#ifdef VERBOSE_LOG
     LogInfo("\tModules->NumberOfModules = %lu\n", outProcMods->NumberOfModules);
     for (ULONG i = 0; i < outProcMods->NumberOfModules; i++)
     {
@@ -116,7 +115,6 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
         LogInfo("\tModule[%d].ImageSize: %p\n", (int)i, (char*)outProcMods->Modules[i].ImageSize);
     }
     LogInfo("EnumKernelModuleInfo() complete\n");
-#endif
     return STATUS_SUCCESS;
 }
 
@@ -192,7 +190,7 @@ bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
 
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(pHead)->e_magic != E_MAGIC)
     {
-        LogInfo("pHead is != 0x%02x @ %p", E_MAGIC, (PVOID)pHead);
+        //LogInfo("pHead is != 0x%02x @ %p", E_MAGIC, (PVOID)pHead);
         return false;
     }
 
@@ -384,16 +382,20 @@ NTSTATUS Utility::QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* da
     return STATUS_SUCCESS;
 }
 
-bool Utility::CheckModulesForAddress(UINT64 address, PSYSTEM_MODULE_INFORMATION procMods)
+bool Utility::CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods)
 {
-    for (size_t i = 0; i < procMods->ModulesCount; i++)
+    RTL_PROCESS_MODULE_INFORMATION sysMod;
+    for (size_t i = 0; i < outProcMods->NumberOfModules; i++)
     {
-        SYSTEM_MODULE_ENTRY sysMod = procMods->Modules[i];
-        if ((UINT64)sysMod.ModuleBaseAddress < address && address < ((UINT64)sysMod.ModuleBaseAddress + sysMod.ModuleSize))
+        sysMod = outProcMods->Modules[i];
+
+        if ((UINT64)sysMod.ImageBase < address && address < ((UINT64)sysMod.ImageBase + sysMod.ImageSize))
         {
+            LogInfo("\t\t\tAddress is within system module:  sysMod.ImageBase: 0x%p , sysMod.MaxAddr: 0x%llx", sysMod.ImageBase, ((UINT64)sysMod.ImageBase + sysMod.ImageSize));
             return true;
         }
     }
+    LogInfo("\t\t\tDetected! Address NOT within system module:  address: 0x%llx", address);
     return false;
 }
 
@@ -462,7 +464,7 @@ NTSTATUS Utility::ScanSystemThreads()
     BOOLEAN isSystemThread = 0;
     HANDLE currentProcessId;
     PVOID systemBigPoolInformation = NULL;
-    PSYSTEM_MODULE_INFORMATION systemModuleInformation = NULL;
+    PRTL_PROCESS_MODULES systemModuleInformation = NULL;
     CONTEXT* context;
     UINT64 currentThreadId = 4;
     HANDLE processID;
@@ -472,6 +474,7 @@ NTSTATUS Utility::ScanSystemThreads()
     STACKWALK_BUFFER stackwalkBuffer;
     PETHREAD threadObject;
 
+    UINT64 suspiciousThreads = 0;
 
     LogInfo("ScanSystemThreads(), Starting routine\n");
     currentProcessId = pPsGetCurrentProcessId();
@@ -546,12 +549,15 @@ NTSTATUS Utility::ScanSystemThreads()
                                     {
                                         if (stackwalkBuffer.EntryCount > 0)                         // and has more than 1 entry in the stack
                                         {
-                                            LogInfo("\t\tExamining thread stack.....");
+                                            LogInfo("\t\t\tExamining thread stack.....");
+                                            LogInfo("\t\t\tstackwalkBuffer.EntryCount: %lu", stackwalkBuffer.EntryCount);
                                             for (size_t i = 0; i < stackwalkBuffer.EntryCount; i++)
                                             {
+                                                LogInfo("\t\t\tstackwalkBuffer.Entry[%llu].RipValue: 0x%llx", i, stackwalkBuffer.Entry[i].RipValue);
                                                 if (!CheckModulesForAddress(stackwalkBuffer.Entry[i].RipValue, systemModuleInformation))
                                                 {
                                                     LogInfo("\t\t\tSUSPICIOUS THREAD DETECTED\n");
+                                                    suspiciousThreads += 1;
                                                     break;
                                                 }
                                             }
@@ -579,6 +585,14 @@ NTSTATUS Utility::ScanSystemThreads()
                         }               
                         currentThreadId += 4;               // thread id's are multiple of 4
                     } while (currentThreadId < 0x3000);     // lol, brute force method by EAC.  Maybe there's a better way
+                    if (suspiciousThreads)
+                    {
+                        LogInfo("Found %llu suspicious threads!", suspiciousThreads);
+                    }
+                    else
+                    {
+                        LogInfo("No suspicious threads found.");
+                    }
                     ExFreePool(context);
                 }
                 else
@@ -602,7 +616,6 @@ NTSTATUS Utility::ScanSystemThreads()
 
 bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
 {
-    char status;
     _QWORD* stackBuffer;
     size_t copiedSize;
     DWORD64 startRip;
@@ -615,8 +628,8 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
     __int64 v18;
     DWORD sectionVa;
     DWORD sectionSize;
+    unsigned __int64 textBase;
 
-    status = 0;
     if (!threadObject)
         return 0;
     if (!stackwalkBuffer)
@@ -624,20 +637,24 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
     memset(context, 0, sizeof(CONTEXT));
     memset(stackwalkBuffer, 0, 0x208);
     
-    stackBuffer = (_QWORD*)ExAllocatePoolWithTag(NonPagedPool, STACK_BUF_SIZE, POOL_TAG);   // sizeof(stackBuffer) == 4096 || 0x1000
+    stackBuffer = (_QWORD*)ExAllocatePoolWithTag(NonPagedPool, STACK_BUF_SIZE, POOL_TAG);
     if (stackBuffer)
     {
-        copiedSize = CopyThreadKernelStack(threadObject, STACK_BUF_SIZE, stackBuffer);
+        copiedSize = CopyThreadKernelStack(threadObject, stackBuffer);
+        LogInfo("\t\t\tCopyThreadKernelStack() copiedSize is: %llu", copiedSize);
         if (copiedSize)
         {
             if (copiedSize != 4096 && copiedSize >= 0x48)
             {
                 if (GetNtoskrnlSection(".text", &sectionVa, &sectionSize))
                 {
+                    textBase = (unsigned __int64)((BYTE*)kernBase + sectionVa);
                     startRip = stackBuffer[7];
-                    if (startRip >= sectionVa && startRip < (UINT64)sectionSize + sectionVa)
+                    LogInfo("\t\t\tntos textBase is: 0x%llx", textBase);
+                    LogInfo("\t\t\tntos textBase end is: 0x%llx", (UINT64)textBase + sectionVa);
+                    LogInfo("\t\t\tthread's startRip is: 0x%llx", startRip);
+                    if (startRip >= textBase && startRip < (UINT64)textBase + sectionVa)
                     {
-                        status = 1;
                         context->Rip = startRip;
                         context->Rsp = (DWORD64)(stackBuffer + 8);
                         index = 0;
@@ -686,11 +703,9 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
     return 1;
 }
 
-size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, void* outStackBuffer)
+UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer)
 {
-    UNREFERENCED_PARAMETER(maxSize);
-
-    size_t copiedSize;
+    size_t copiedSize = 0;
     size_t threadStateOffset;
     size_t kernelStackOffset;
     size_t threadStackBaseOffset;
@@ -698,13 +713,12 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     size_t threadStackLimitOffset;
     size_t threadStackLimit;
     bool isSystemThread;
-    void** pKernelStack; // r12
-    __int64 _oldIrql; // rdx
-    __int64 threadLockOffset; // eax
-    KSPIN_LOCK* threadLock; // rcx
-    unsigned __int8 oldIrql; // [rsp+50h] [rbp+8h]
+    void** pKernelStack;
+    __int64 _oldIrql;
+    __int64 threadLockOffset;
+    KSPIN_LOCK* threadLock;
+    KIRQL oldIrql;
 
-    copiedSize = 0;
     threadStateOffset = GetThreadStateOffset();
     LogInfo("\t\t\tthreadStateOffset: 0x%llx", threadStateOffset);
     kernelStackOffset = GetKernelStackOffset();
@@ -726,7 +740,7 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     }
 
     threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + (BYTE*)threadObject) : 0;
-    isSystemThread = pPsIsSystemThread ? (unsigned __int8)pPsIsSystemThread(threadObject) : 0;
+    isSystemThread = pPsIsSystemThread ? pPsIsSystemThread(threadObject) : 0;
     
     if (!isSystemThread
         || !outStackBuffer
@@ -743,22 +757,51 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
 
     pKernelStack = (void**)((BYTE*)threadObject + kernelStackOffset);
     memset(outStackBuffer, 0, 0x2000);
-    if (LockThread((__int64)threadObject, (unsigned __int8*)&oldIrql))
+    if (LockThread((PKTHREAD)threadObject, &oldIrql))
     {
         PHYSICAL_ADDRESS physAddr = MmGetPhysicalAddress(*pKernelStack);
-        
-        if (!PsIsThreadTerminating(threadObject)
-            && *(BYTE*)(threadStateOffset + (BYTE*)threadObject) == 5
-            && (unsigned __int64)*pKernelStack > threadStackLimit
-            && (unsigned __int64)*pKernelStack < threadStackBase
-            && physAddr.QuadPart)
+        if (!PsIsThreadTerminating(threadObject))
         {
-            copiedSize = threadStackBase - (_QWORD)*pKernelStack;
-            if (copiedSize > 0x2000)
-                copiedSize = 0x2000;
-            memmove(outStackBuffer, *pKernelStack, copiedSize);
-        }
+            if (*(BYTE*)(threadStateOffset + (BYTE*)threadObject) == 5)
+            {
+                if ((unsigned __int64)*pKernelStack > threadStackLimit)
+                {
+                    if ((unsigned __int64)*pKernelStack < threadStackBase)
+                    {
+                        if (physAddr.QuadPart)
+                        {
+                            copiedSize = threadStackBase - (_QWORD)*pKernelStack;
+                            if (copiedSize > 0x2000)
+                                copiedSize = 0x2000;
+                            memmove(outStackBuffer, *pKernelStack, copiedSize);
+                        }
+                        else
+                        {
+                            LogInfo("\t\t\tCopyThreadKernelStack() aborted.  !physAddr.QuadPart");
+                            
+                        }
+                    }
+                    else
+                    {
+                        LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *pKernelStack >= threadStackBase");
+                    }
+                }
+                else
+                {
+                    LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *pKernelStack >= threadStackBase");
+                }
 
+            }
+            else
+            {
+                LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *(BYTE*)(threadStateOffset + (BYTE*)threadObject) != 5(Waiting state)");
+            }
+        }
+        else
+        {
+            LogInfo("\t\t\tCopyThreadKernelStack() aborted.  PsIsThreadTerminating(threadObject) == true");
+        }
+        
         if (SharedUserData->NtMajorVersion >= 6 && SharedUserData->NtMajorVersion != 6 || !SharedUserData->NtMinorVersion)  //  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
         {
             threadLockOffset = GetThreadLockOffset();
@@ -785,38 +828,42 @@ size_t Utility::CopyThreadKernelStack(PETHREAD threadObject, __int64 maxSize, vo
     return copiedSize;
 }
 
-__int64 Utility::LockThread(_In_ __int64 Thread, _Out_ unsigned __int8* Irql)
+_Success_(return)
+BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql)
 {
-    __int64 ThreadLockOffset;
-    unsigned __int8 CurrentIrql;
+    KIRQL currentIrql;
+    UINT64 ThreadLockOffset;
     KSPIN_LOCK* threadLock;
-
+    
     if (Thread && Irql)
     {
         if (SharedUserData->NtMajorVersion >= 6 && (SharedUserData->NtMajorVersion != 6 || SharedUserData->NtMinorVersion))
         {
             ThreadLockOffset = GetThreadLockOffset();
-            if (((Thread + ThreadLockOffset) & -(__int64)(ThreadLockOffset != 0)) != 0)
+            threadLock = (PKSPIN_LOCK)((BYTE*)Thread + ThreadLockOffset);
+            if (threadLock && ThreadLockOffset)
             {
-                CurrentIrql = KeGetCurrentIrql();
-                __writecr8(0xC);
-                *Irql = CurrentIrql;
-                BYTE* newthreadLock = (BYTE*)Thread + ThreadLockOffset;
-                signed __int64 rightExpression = -(signed __int64)(ThreadLockOffset != 0);
-                threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
-                KeAcquireSpinLockAtDpcLevel(threadLock);
-                return 1;
+                    currentIrql = KeGetCurrentIrql();
+                    __writecr8(0xC);
+                    *Irql = currentIrql;
+                    KeAcquireSpinLockAtDpcLevel(threadLock);
+                    return SUCCESS;
             }
-            return 0;
+            else
+            {
+                return FAIL;
+            }
         }
-        if (pKeReleaseQueuedSpinLock && pKeAcquireQueuedSpinLockRaiseToSynch)
+        else
         {
             *Irql = pKeAcquireQueuedSpinLockRaiseToSynch(0);
-            return 1;
+            return SUCCESS;
         }
-        return 0;
     }
-    return 0;
+    else
+    {
+        return FAIL;
+    }
 }
 
 __int64 Utility::GetThreadStackLimit()

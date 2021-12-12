@@ -45,11 +45,10 @@ namespace NomadDrv {
         LogInfo("Driver initialized successfully\n");
 
         Utility MainUtility(DriverObject);
-
+        MainUtility.EnumKernelModuleInfo(NULL);
         MainUtility.ScanSystemThreads();
 
         // All checks complete
-        LogInfo("All checks passed.  Nothing suspicious.\n");
         return STATUS_SUCCESS;
     }
 
