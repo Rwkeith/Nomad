@@ -105,6 +105,7 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
         *procMods = outProcMods;
     }
 
+#ifdef VERBOSE_LOG
     LogInfo("\tModules->NumberOfModules = %lu\n", outProcMods->NumberOfModules);
     for (ULONG i = 0; i < outProcMods->NumberOfModules; i++)
     {
@@ -115,6 +116,8 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
         LogInfo("\tModule[%d].ImageSize: %p\n", (int)i, (char*)outProcMods->Modules[i].ImageSize);
     }
     LogInfo("EnumKernelModuleInfo() complete\n");
+#endif // VERBOSE_LOG
+
     return STATUS_SUCCESS;
 }
 
@@ -748,7 +751,7 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
         || !(DWORD)kernelStackOffset
         || !threadStackBase
         || !threadStackLimit
-        || KeGetCurrentIrql() > 1       // read cr8
+        || KeGetCurrentIrql() > 1
         || (PKTHREAD)threadObject == KeGetCurrentThread())        //KeGetCurrentThread() is inlined, gs register access.
     {
         LogInfo("\t\t\tCopyThreadKernelStack() aborted.  Examine checks.");
@@ -757,16 +760,18 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
 
     pKernelStack = (void**)((BYTE*)threadObject + kernelStackOffset);
     memset(outStackBuffer, 0, 0x2000);
+    LogInfo("Thread State before locking");
     if (LockThread((PKTHREAD)threadObject, &oldIrql))
     {
         PHYSICAL_ADDRESS physAddr = MmGetPhysicalAddress(*pKernelStack);
         if (!PsIsThreadTerminating(threadObject))
         {
-            if (*(BYTE*)(threadStateOffset + (BYTE*)threadObject) == 5)
+
+            if (*(BYTE*)(threadStateOffset + (BYTE*)threadObject) == KTHREAD_STATE::Waiting)
             {
-                if ((unsigned __int64)*pKernelStack > threadStackLimit)
+                if ((UINT64)*pKernelStack > threadStackLimit)
                 {
-                    if ((unsigned __int64)*pKernelStack < threadStackBase)
+                    if ((UINT64)*pKernelStack < threadStackBase)
                     {
                         if (physAddr.QuadPart)
                         {
@@ -795,6 +800,7 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
             else
             {
                 LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *(BYTE*)(threadStateOffset + (BYTE*)threadObject) != 5(Waiting state)");
+                LogInfo("\t\t\tThread State is: %hhu", *(BYTE*)(threadStateOffset + (BYTE*)threadObject));
             }
         }
         else
@@ -844,9 +850,15 @@ BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql)
             if (threadLock && ThreadLockOffset)
             {
                     currentIrql = KeGetCurrentIrql();
+                    LogInfo("\t\t\tCurrent IRQL: %d", currentIrql);
+                    // set interrupt mask 3:0 to b1100
                     __writecr8(0xC);
                     *Irql = currentIrql;
+                    LogInfo("\t\t\tThread State before KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
                     KeAcquireSpinLockAtDpcLevel(threadLock);
+                    LogInfo("\t\t\tThread State after KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
+                    currentIrql = KeGetCurrentIrql();
+                    LogInfo("\t\t\tCurrent IRQL after KeAcquireSpinLockAtDpcLevel: %hhu", currentIrql);
                     return SUCCESS;
             }
             else
@@ -856,6 +868,7 @@ BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql)
         }
         else
         {
+            LogInfo("\t\t\tUsing pKeAcquireQueuedSpinLockRaiseToSynch");
             *Irql = pKeAcquireQueuedSpinLockRaiseToSynch(0);
             return SUCCESS;
         }
@@ -866,14 +879,14 @@ BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql)
     }
 }
 
-__int64 Utility::GetThreadStackLimit()
+UINT64 Utility::GetThreadStackLimit()
 {
-    PETHREAD thisKThread; // rbx
-    unsigned __int64 v2; // rax
-    _QWORD* v3; // rcx
+    PETHREAD thisKThread;
+    unsigned __int64 v2;
+    _QWORD* v3;
 
-    thisKThread = (PETHREAD)__readgsqword(0x188u);
-    if ((unsigned int)SpinLock(&gSpinLock6) == 259)
+    thisKThread = (PETHREAD)__readgsqword(0x188);
+    if (SpinLock(&gSpinLock6) == 259)
     {
             v2 = (__int64)pPsGetCurrentThreadStackLimit();
             v3 = (_QWORD*)thisKThread;
@@ -887,7 +900,7 @@ __int64 Utility::GetThreadStackLimit()
                 gThreadStackLimit = (UINT64)v3 - (UINT64)thisKThread;
             }
     LABEL_9:
-        _InterlockedExchange64(&gSpinLock6, 2i64);
+        _InterlockedExchange64(&gSpinLock6, 2);
     }
     return gThreadStackLimit;
 }
@@ -1086,7 +1099,7 @@ __int64 Utility::GetThreadStateOffset()
     return (unsigned int)gkThreadStateOffset;
 }
 
-__int64 Utility::SpinLock(volatile signed __int64* Lock)
+UINT32 Utility::SpinLock(volatile signed __int64* Lock)
 {
     if (*Lock != 2)
     {

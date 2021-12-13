@@ -38,7 +38,20 @@
 #define SUCCESS 1
 #define FAIL 0
 
-
+//
+// Thread States
+//
+typedef enum _KTHREAD_STATE
+{
+	Initialized,
+	Ready,
+	Running,
+	Standby,
+	Terminated,
+	Waiting,
+	Transition,
+	DeferredReady
+} KTHREAD_STATE, * PKTHREAD_STATE;
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
 	union {
@@ -154,9 +167,9 @@ public:
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
 	__int64 GetThreadStateOffset();
-	__int64 GetThreadStackLimit();
+	UINT64 GetThreadStackLimit();
 	__int64 GetThreadLockOffset();
-	__int64 SpinLock(volatile signed __int64* Lock);
+	UINT32 SpinLock(volatile signed __int64* Lock);
 	__int64 GetKernelStackOffset();
 	__int64 GetInitialStackOffset();
 	__int64 GetStackBaseOffset();
