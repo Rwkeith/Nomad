@@ -2,7 +2,6 @@
 #include "Utility.h"
 #include "Driver.h"
 
-/// EAC's System thread scanning method
 // https://www.unknowncheats.me/forum/anti-cheat-bypass/325212-eac-system-thread-detection.html
 NTSTATUS Utility::ScanSystemThreads()
 {
@@ -518,9 +517,9 @@ __int64 Utility::GetKernelStackOffset()
 
 __int64 Utility::GetInitialStackOffset()
 {
-    unsigned __int64 thisKThread; // rbx
-    _int64 v2; // rax
-    _QWORD* v3; // rcx
+    unsigned __int64 thisKThread;
+    _int64 v2;
+    _QWORD* v3;
 
     thisKThread = __readgsqword(0x188);
     if ((unsigned int)SpinLock(&gSpinLock2) == 259)
@@ -542,46 +541,53 @@ __int64 Utility::GetInitialStackOffset()
     return (unsigned int)gInitialStackOffset;
 }
 
-__int64 Utility::GetStackBaseOffset()
+/// <summary>
+/// Get offset of Tcb.StackBase from ETHREAD
+/// </summary>
+/// <returns>offset on success</returns>
+UINT32 Utility::GetStackBaseOffset()
 {
-    PETHREAD thiskThread; // rbx
-    __int64 stackBase; // rax
-    _QWORD* v3; // rcx
+    PETHREAD kThread;
+    PVOID stackBase;
+    UINT64* kThreadStackBaseAddr;
 
-    thiskThread = (PETHREAD)__readgsqword(0x188);
-    if ((unsigned int)SpinLock(&gSpinLock5) == 259)
+    kThread = (PETHREAD)__readgsqword(0x188);
+    if (SpinLock(&gSpinLock5) == 259)
     {
-        stackBase = (__int64)pPsGetCurrentThreadStackBase();
-        v3 = (_QWORD*)thiskThread;
-        if ((UINT64)thiskThread < ((UINT64)thiskThread + 0x2F8))
+        stackBase = pPsGetCurrentThreadStackBase();
+        kThreadStackBaseAddr = (UINT64*)kThread;
+        if ((UINT64)kThread < ((UINT64)kThread + 0x2F8))
         {
-            while (*v3 != stackBase)
+            while (*kThreadStackBaseAddr != (UINT64)stackBase)
             {
-                if ((unsigned __int64)++v3 >= (UINT64)thiskThread + 0x2F8)
-                    goto LABEL_9;
+                if ((UINT64)++kThreadStackBaseAddr >= (UINT64)kThread + 0x2F8)
+                {
+                    LogInfo("\t\t\tUnable to find Stack Base Offset.");
+                    _InterlockedExchange64(&gSpinLock5, 2);
+                    return FAIL;
+                }
             }
-            gStackBaseOffset = (UINT64)v3 - (UINT64)thiskThread;
+            gStackBaseOffset = (UINT64)kThreadStackBaseAddr - (UINT64)kThread;
+            _InterlockedExchange64(&gSpinLock5, 2);
         }
-    LABEL_9:
-        _InterlockedExchange64(&gSpinLock5, 2);
     }
-    return (unsigned int)gStackBaseOffset;
+    return gStackBaseOffset;
 }
 
-__int64 Utility::GetThreadLockOffset()
+/// <summary>
+/// Get the thread lock offset
+/// </summary>
+/// <returns>byte offset of thread lock from base of ETHREAD</returns>
+UINT32 Utility::GetThreadLockOffset()
 {
-    unsigned __int8* Export;
-    unsigned __int8* maxOffset;
-    unsigned __int8* addrOffset;
-    unsigned __int8* threadLockOffset;
+    BYTE* maxOffset;
+    BYTE* threadLockOffset;
 
-    if ((unsigned int)SpinLock(&gSpinLock1) == 259)
+    if (SpinLock(&gSpinLock1) == 259)
     {
-        Export = (unsigned __int8*)KeSetPriorityThread;
-        if (Export)
+        if ((UINT64)KeSetPriorityThread)
         {
-            maxOffset = Export + 0xF1;
-            if (threadLockPatternMatch(Export, &threadLockOffset, 0xF1))
+            if (threadLockPatternMatch((BYTE*)KeSetPriorityThread, &threadLockOffset, 0xF1))
             {
                 LogInfo("\t\t\tthreadLockPatternMatch() found a match at %p with offset value %lu", threadLockOffset, *threadLockOffset);
                 gThreadLockOffset = (unsigned __int8)*threadLockOffset;
@@ -592,12 +598,15 @@ __int64 Utility::GetThreadLockOffset()
                 gThreadLockOffset = 0;
             }
         }
-        // Acquire the lock so we only search for the offset once
         _InterlockedExchange64(&gSpinLock1, 2);
     }
     return gThreadLockOffset;
 }
 
+/// <summary>
+/// Get the thread state offset
+/// </summary>
+/// <returns>byte offset of thread state from base of ETHREAD</returns>
 UINT32 Utility::GetThreadStateOffset()
 {
     UINT32* threadStateOffset;
@@ -620,7 +629,7 @@ UINT32 Utility::GetThreadStateOffset()
                 else
                 {
                     LogError("\t\t\tthreadStatePatternMatch() failed to find a match");
-                    return FAIL;
+                    return gkThreadStateOffset;
                 }
             }
         }
@@ -637,507 +646,6 @@ UINT32 Utility::GetThreadStateOffset()
         _InterlockedExchange64(&gSpinLock3, 2);
     }
     return gkThreadStateOffset;
-}
-
-// General pattern matcher.
-__int64 Utility::patternMatcher(unsigned __int8* address, UINT64 outBuffer)
-{
-    BYTE* v3; // rbx
-    char v4; // r14
-    unsigned __int8 v5; // dl
-    unsigned __int8 v6; // r13
-    unsigned __int8* _localAddress; // r9
-    char v8; // r11
-    unsigned int currentByte; // er10
-    unsigned __int64 v10; // rcx
-    unsigned __int64 v11; // rax
-    char v12; // al
-    char v13; // cl
-    int v14; // er11
-    unsigned __int8 v15; // bp
-    unsigned __int16 v16; // si
-    unsigned __int8 v17; // r12
-    __int16 v18; // di
-    char v19; // r15
-    int v20; // ebx
-    int v21; // ebx
-    int v22; // er10
-    unsigned __int8 v23; // r14
-    char v24; // cl
-    unsigned __int8 v25; // al
-    unsigned __int8 v26; // r14
-    unsigned __int8 v27; // r11
-    int v28; // eax
-    unsigned __int8 v29; // di
-    __int64 v30; // rdx
-    unsigned __int8 v31; // cl
-    char v32; // r11
-    bool v33; // sf
-    char v34; // bl
-    char v35; // dl
-    BYTE* v36; // r10
-    BYTE* v37; // rcx
-    BYTE* v38; // rcx
-    BYTE* v39; // rdx
-    bool v40; // zf
-    unsigned __int8 v41; // dl
-    unsigned __int8* v42; // r9
-    char v43; // al
-    char v44; // dl
-    unsigned __int8* v45; // r9
-    __int16 v46; // ax
-    __int64 v47; // rax
-    __int16 v48; // ax
-    char v49; // al
-    unsigned __int8 v50; // al
-    unsigned __int8 offsetFromAddress; // r9
-    int v53; // eax
-    int v54; // eax
-    char v55; // [rsp+0h] [rbp-58h]
-    char localAddr; // [rsp+60h] [rbp+8h]
-    unsigned __int8 v57; // [rsp+68h] [rbp+10h]
-    unsigned __int8 v58; // [rsp+70h] [rbp+18h]
-    char v59; // [rsp+78h] [rbp+20h]
-
-
-
-    localAddr = (char)address;
-    v3 = patContainer.unk_1400567A0;
-    v4 = 0;
-    v5 = 0;
-    v55 = 0;
-    v6 = 0;
-    _localAddress = address;
-    v8 = 16;
-    memset((void*)outBuffer, 0, 37);
-    do
-    {
-        currentByte = *_localAddress++;
-        if (currentByte > 0x65)
-        {
-            switch (currentByte)
-            {
-            case 0x66:
-                *(BYTE*)(outBuffer + 4) = 0x66;
-                v12 = 8;
-                break;
-            case 0x67:
-                *(BYTE*)(outBuffer + 5) = 0x67;
-                v12 = 16;
-                break;
-            case 0xF0:
-                *(BYTE*)(outBuffer + 2) = 0xF0;
-                v12 = 32;
-                break;
-            case 0xF2:
-                *(BYTE*)(outBuffer + 1) = 0xF2;
-                v12 = 2;
-                break;
-            case 0xF3:
-                *(BYTE*)(outBuffer + 1) = 0xF3;
-                v12 = 4;
-                break;
-            default:
-                goto LABEL_17;
-            }
-            goto LABEL_16;
-        }
-        v10 = currentByte - 0x26;
-        if ((unsigned int)v10 > 0x3F)
-            break;
-        v11 = 0xC000000001010101;
-        if (!_bittest64((const __int64*)&v11, v10))
-            break;
-        *(BYTE*)(outBuffer + 3) = currentByte;
-        v12 = 64;
-    LABEL_16:
-        v5 |= v12;
-        --v8;
-    } while (v8);
-LABEL_17:
-    v13 = 1;
-    v14 = v5 << 23;
-    *(DWORD*)(outBuffer + 33) = v14;
-    if (v5)
-        v13 = v5;
-    if ((currentByte & 0xF0) == 64)
-    {
-        v14 |= 0x40000000u;
-        *(DWORD*)(outBuffer + 33) = v14;
-        *(BYTE*)(outBuffer + 7) = (currentByte & 8) != 0;
-        if ((currentByte & 8) != 0)
-        {
-            v4 = (*_localAddress & 0xF8) == 0xB8;
-            v55 = v4;
-        }
-        *(BYTE*)(outBuffer + 8) = (currentByte & 4) != 0;
-        *(BYTE*)(outBuffer + 10) = currentByte & 1;
-        *(BYTE*)(outBuffer + 9) = (currentByte & 2) != 0;
-        LOBYTE(currentByte) = *_localAddress++;
-        if ((currentByte & 0xF0) == 64)
-        {
-            v57 = currentByte;
-            v15 = v13;
-            goto LABEL_32;
-        }
-    }
-    *(BYTE*)(outBuffer + 11) = currentByte;
-    v15 = v13;
-    if ((BYTE)currentByte == 15)
-    {
-        LOBYTE(currentByte) = *_localAddress;
-        v3 = patContainer.unk_1400567EA;
-        *(BYTE*)(outBuffer + 12) = *_localAddress++;
-    }
-    else if ((unsigned __int8)currentByte >= 0xA0u && (unsigned __int8)currentByte <= 0xA3u)
-    {
-        v55 = ++v4;
-        if ((v13 & 0x10) != 0)
-            v15 = v13 | 8;
-        else
-            v15 = v13 & 0xF7;
-    }
-    v57 = currentByte;
-    LOBYTE(v16) = v3[(unsigned __int8)v3[(unsigned __int64)(unsigned __int8)currentByte >> 2] + (currentByte & 3)];
-    if ((BYTE)v16 == 0xFF)
-    {
-    LABEL_32:
-        v14 |= 0x3000u;
-        *(DWORD*)(outBuffer + 33) = v14;
-        LOBYTE(v16) = 0;
-        if ((currentByte & 0xFD) == 36)
-        {
-            LOBYTE(v16) = 1;
-            v17 = currentByte;
-            LOBYTE(v18) = 0;
-            goto LABEL_36;
-        }
-    }
-    LOBYTE(v18) = 0;
-    v17 = currentByte;
-    if ((v16 & 0x80u) != 0)
-    {
-        v16 = *(WORD*)&v3[v16 & 0x7F];
-        v18 = HIBYTE(v16);
-    }
-LABEL_36:
-    v19 = *(BYTE*)(outBuffer + 12);
-    v20 = v14;
-    bool leftHalf_RightExp = ((unsigned __int64)(v15 & *(BYTE*)patContainer.unk_1400567A0 + (currentByte & 3)) + (unsigned __int64)*((unsigned __int8*)patContainer.unk_1400567A0 + ((unsigned __int64)(unsigned __int8)currentByte >> 2) + 316) + 316);
-    bool rightExp = leftHalf_RightExp != 0;
-    if (v19 && rightExp)
-    {
-        v20 = v14 | 0x3000;
-        *(DWORD*)(outBuffer + 33) = v14 | 0x3000;
-    }
-    if ((v16 & 1) != 0)
-    {
-        v21 = v20 | 1;
-        *(DWORD*)(outBuffer + 33) = v21;
-        v22 = v21;
-        v23 = *_localAddress;
-        *(BYTE*)(outBuffer + 13) = *_localAddress;
-        v24 = v23 >> 6;
-        v25 = v23 & 7;
-        v26 = (v23 >> 3) & 7;
-        v59 = v24;
-        *(BYTE*)(outBuffer + 14) = v24;
-        v58 = v25;
-        *(BYTE*)(outBuffer + 16) = v25;
-        *(BYTE*)(outBuffer + 15) = v26;
-        if ((BYTE)v18 && (((unsigned __int8)v18 << v26) & 0x80u) != 0)
-        {
-            v22 = v21 | 0x3000;
-            *(DWORD*)(outBuffer + 33) = v21 | 0x3000;
-        }
-        v27 = v57;
-        v28 = v22;
-        if (v19 || v57 < 0xD9u || v57 > 0xDFu)
-        {
-            v29 = v58;
-        }
-        else
-        {
-            v29 = v58;
-            v30 = (unsigned __int8)(v57 + 39);
-            if (v24 == 3)
-            {
-                v31 = v58;
-                v32 = *((BYTE*)patContainer.unk_1400567A0 + 8 * v30 + v26 + 260);
-            }
-            else
-            {
-                v31 = v26;
-                v32 = *((BYTE*)patContainer.unk_1400567A0 + v30 + 253);
-            }
-            v28 = v22;
-            v33 = ((v32 << v31) & 0x80u) != 0;
-            v27 = v57;
-            if (v33)
-            {
-                v28 = v22 | 0x3000;
-                *(DWORD*)(outBuffer + 33) = v22 | 0x3000;
-            }
-        }
-        v34 = v59;
-        if ((v15 & 0x20) != 0)
-        {
-            if (v59 == 3)
-            {
-                *(DWORD*)(outBuffer + 33) = v28 | 0x9000;
-            }
-            else
-            {
-                v35 = v27;
-                if (!v19)
-                    v35 = v27 & 0xFE;
-                v36 = patContainer.unk_140056978;
-                if (!v19)
-                    v36 = patContainer.unk_140056966;
-                v37 = patContainer.unk_140056966;
-                if (!v19)
-                    v37 = patContainer.unk_14005694E;
-                while (v37 != v36)
-                {
-                    if (*v37 == v35)
-                    {
-                        if ((((unsigned __int8)v37[1] << v26) & 0x80u) == 0)
-                            goto LABEL_68;
-                        break;
-                    }
-                    v37 += 2;
-                }
-                *(DWORD*)(outBuffer + 33) |= 0x9000u;
-            }
-        }
-    LABEL_68:
-        if (!v19)
-        {
-            if (v17 != 140)
-            {
-                if (v17 != 142)
-                    goto LABEL_80;
-                if (v26 == 1)
-                    goto LABEL_103;
-            }
-            if (v26 > 5u)
-                goto LABEL_103;
-            goto LABEL_104;
-        }
-        switch (v17)
-        {
-        case ' ':
-            goto LABEL_75;
-        case '!':
-            goto LABEL_73;
-        case '"':
-        LABEL_75:
-            v34 = 3;
-            if (v26 <= 4u && v26 != 1)
-                goto LABEL_104;
-            goto LABEL_103;
-        case '#':
-        LABEL_73:
-            v34 = 3;
-            if ((unsigned __int8)(v26 - 4) <= 1u)
-                goto LABEL_103;
-            goto LABEL_104;
-        }
-    LABEL_80:
-        if (v59 == 3)
-        {
-            if (!v19)
-            {
-                v39 = patContainer.unk_140056987;
-                v38 = patContainer.unk_140056978;
-                goto LABEL_85;
-            }
-            v38 = patContainer.unk_140056987;
-            v39 = patContainer.unk_1400569B1;
-            if (patContainer.unk_140056987 == patContainer.unk_1400569B1)
-                goto LABEL_104;
-        LABEL_85:
-            // PAGE FAULT HERE
-            while (*v38 != v27)
-            {
-                v38 += 3;
-                if (v38 == v39)
-                    goto LABEL_104;
-            }
-            if ((v15 & v38[1]) == 0 || (((unsigned __int8)v38[2] << v26) & 0x80u) != 0)
-            {
-            LABEL_104:
-                v41 = _localAddress[1];
-                v42 = _localAddress + 2;
-                if (v26 <= 1u)
-                {
-                    if (v27 == 0xF6)
-                    {
-                        LOBYTE(v16) = v16 | 2;
-                    }
-                    else if (v27 == 0xF7)
-                    {
-                        LOBYTE(v16) = v16 | 0x10;
-                    }
-                }
-                if (v34)
-                {
-                    if (v34 == 1)
-                    {
-                        v6 = 1;
-                    }
-                    else if (v34 == 2)
-                    {
-                        v6 = 2;
-                        if ((v15 & 0x10) == 0)
-                            v6 = 4;
-                    }
-                }
-                else if ((v15 & 0x10) != 0)
-                {
-                    v6 = v29 != 6 ? 0 : 2;
-                }
-                else
-                {
-                    v6 = 0;
-                    if (v29 == 5)
-                        v6 = 4;
-                }
-                if (v34 != 3 && v29 == 4)
-                {
-                    *(DWORD*)(outBuffer + 33) |= 2u;
-                    ++v42;
-                    *(BYTE*)(outBuffer + 18) = v41 >> 6;
-                    v43 = (v41 >> 3) & 7;
-                    *(BYTE*)(outBuffer + 17) = v41;
-                    v44 = v41 & 7;
-                    *(BYTE*)(outBuffer + 19) = v43;
-                    *(BYTE*)(outBuffer + 20) = v44;
-                    if (v44 == 5 && (v34 & 1) == 0)
-                        v6 = 4;
-                }
-                v45 = v42 - 1;
-                switch (v6)
-                {
-                case 1u:
-                    *(DWORD*)(outBuffer + 33) |= 0x40u;
-                    *(BYTE*)(outBuffer + 29) = *v45;
-                    break;
-                case 2u:
-                    *(DWORD*)(outBuffer + 33) |= 0x80u;
-                    *(WORD*)(outBuffer + 29) = *(WORD*)v45;
-                    break;
-                case 4u:
-                    *(DWORD*)(outBuffer + 33) |= 0x100u;
-                    *(DWORD*)(outBuffer + 29) = *(DWORD*)v45;
-                    break;
-                }
-                v4 = v55;
-                _localAddress = &v45[v6];
-                goto LABEL_133;
-            }
-        LABEL_103:
-            *(DWORD*)(outBuffer + 33) |= 0x11000u;
-            goto LABEL_104;
-        }
-        if (!v19)
-            goto LABEL_104;
-        switch (v17)
-        {
-        case 0x50u:
-        LABEL_97:
-            v40 = (v15 & 9) == 0;
-            break;
-        case 0xC5u:
-            goto LABEL_103;
-        case 0xD6u:
-            v40 = (v15 & 6) == 0;
-            break;
-        case 0xD7u:
-        case 0xF7u:
-            goto LABEL_97;
-        default:
-            goto LABEL_104;
-        }
-        if (!v40)
-            goto LABEL_103;
-        goto LABEL_104;
-    }
-    if ((v15 & 0x20) != 0)
-        *(DWORD*)(outBuffer + 33) = v20 | 0x9000;
-LABEL_133:
-    if ((v16 & 0x10) != 0)
-    {
-        if ((v16 & 0x40) != 0)
-        {
-            if ((v15 & 8) != 0)
-            {
-                *(DWORD*)(outBuffer + 33) |= 0x208u;
-                v46 = *(WORD*)_localAddress;
-                LOBYTE(_localAddress) = (BYTE)_localAddress + 2;
-                *(WORD*)(outBuffer + 21) = v46;
-                goto LABEL_146;
-            }
-        LABEL_151:
-            *(DWORD*)(outBuffer + 33) |= 0x210u;
-            v54 = *(DWORD*)_localAddress;
-            LOBYTE(_localAddress) = (BYTE)_localAddress + 4;
-            *(DWORD*)(outBuffer + 21) = v54;
-            goto LABEL_146;
-        }
-        if (v4)
-        {
-            *(DWORD*)(outBuffer + 33) |= 0x20u;
-            v47 = *(_QWORD*)_localAddress;
-            _localAddress += 8;
-            *(_QWORD*)(outBuffer + 21) = v47;
-            goto LABEL_139;
-        }
-        if ((v15 & 8) == 0)
-        {
-            *(DWORD*)(outBuffer + 33) |= 0x10u;
-            v53 = *(DWORD*)_localAddress;
-            _localAddress += 4;
-            *(DWORD*)(outBuffer + 21) = v53;
-            goto LABEL_139;
-        }
-    LABEL_140:
-        *(DWORD*)(outBuffer + 33) |= 8u;
-        v48 = *(WORD*)_localAddress;
-        _localAddress += 2;
-        *(WORD*)(outBuffer + 21) = v48;
-    }
-    else
-    {
-    LABEL_139:
-        if ((v16 & 4) != 0)
-            goto LABEL_140;
-    }
-    if ((v16 & 2) != 0)
-    {
-        *(DWORD*)(outBuffer + 33) |= 4u;
-        v49 = *_localAddress++;
-        *(BYTE*)(outBuffer + 21) = v49;
-    }
-    if ((v16 & 0x40) != 0)
-        goto LABEL_151;
-    if ((v16 & 0x20) != 0)
-    {
-        *(DWORD*)(outBuffer + 33) |= 0x204u;
-        v50 = *_localAddress;
-        LOBYTE(_localAddress) = (BYTE)_localAddress + 1;
-        *(BYTE*)(outBuffer + 21) = v50;
-    }
-LABEL_146:
-    offsetFromAddress = (BYTE)_localAddress - localAddr;
-    *(BYTE*)outBuffer = offsetFromAddress;
-    if (offsetFromAddress > 0xFu)
-    {
-        *(DWORD*)(outBuffer + 33) |= 0x5000u;
-        offsetFromAddress = 0xF;
-        *(BYTE*)outBuffer = 15;
-    }
-    return offsetFromAddress;
 }
 
 /// <summary>
