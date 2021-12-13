@@ -158,6 +158,7 @@ public:
 	NTSTATUS EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods);
 	NTSTATUS ImportNtPrimitives();
 	bool IsValidPEHeader(_In_ const uintptr_t head);
+	BOOLEAN IsWindows7();
 	bool CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods);
 	PVOID GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject);
 	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer);
@@ -166,7 +167,7 @@ public:
 	NTSTATUS QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
-	__int64 GetThreadStateOffset();
+	UINT32 GetThreadStateOffset();
 	UINT64 GetThreadStackLimit();
 	__int64 GetThreadLockOffset();
 	UINT32 SpinLock(volatile signed __int64* Lock);
@@ -175,8 +176,8 @@ public:
 	__int64 GetStackBaseOffset();
 	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql);
 	__int64 patternMatcher(unsigned __int8* address, UINT64 outBuffer);
-	__int64 threadStatePatternMatch(unsigned __int8* address, unsigned int **outOffset, int range);
-	__int64 threadLockPatternMatch(unsigned __int8* address, unsigned __int8** outOffset, int range);
+	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ unsigned int **outOffset, _In_ UINT32 range);
+	BOOLEAN threadLockPatternMatch(_In_ BYTE* address, _Inout_ unsigned __int8** outOffset, _In_ UINT32 range);
 	//PKTHREAD KeGetCurrentThread();
 
 	NTSTATUS ScanSystemThreads();
