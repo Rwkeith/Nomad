@@ -526,30 +526,36 @@ UINT32 Utility::GetKernelStackOffset()
     return gKernelStackOffset;
 }
 
-__int64 Utility::GetInitialStackOffset()
+/// <summary>
+/// Get offset of Tcb.InitialStack from ETHREAD
+/// </summary>
+/// <returns>offset on success</returns>
+UINT32 Utility::GetInitialStackOffset()
 {
-    unsigned __int64 thisKThread;
-    _int64 v2;
-    _QWORD* v3;
+    PETHREAD thisThread;
+    UINT64 initialStack;
+    UINT64* currThreadAddr;
+    USHORT maxOffset = 0x2F8;
 
-    thisKThread = __readgsqword(0x188);
-    if ((unsigned int)SpinLock(&gSpinLock2) == 259)
+    thisThread = (PETHREAD)__readgsqword(0x188);
+    if (SpinLock(&gSpinLock2) == 259)
     {
-        v2 = (__int64)IoGetInitialStack();
-        v3 = (_QWORD*)thisKThread;
-        if (thisKThread < thisKThread + 760)
+        initialStack = (UINT64)IoGetInitialStack();
+        currThreadAddr = (UINT64*)thisThread;
+        if ((UINT64)thisThread < (UINT64)thisThread + maxOffset)
         {
-            while (*v3 != v2)
+            while (*currThreadAddr != initialStack)
             {
-                if ((unsigned __int64)++v3 >= thisKThread + 760)
-                    goto LABEL_9;
+                if ((UINT64)++currThreadAddr >= (UINT64)thisThread + maxOffset)
+                {
+                    _InterlockedExchange64(&gSpinLock2, 2);
+                    return gInitialStackOffset;
+                }
             }
-            gInitialStackOffset = (DWORD)v3 - thisKThread;
+            gInitialStackOffset = (UINT64)currThreadAddr - (UINT64)thisThread;
         }
-    LABEL_9:
-        _InterlockedExchange64(&gSpinLock2, 2);
     }
-    return (unsigned int)gInitialStackOffset;
+    return gInitialStackOffset;
 }
 
 /// <summary>
@@ -591,7 +597,6 @@ UINT32 Utility::GetStackBaseOffset()
 /// <returns>byte offset of thread lock from base of ETHREAD</returns>
 UINT32 Utility::GetThreadLockOffset()
 {
-    BYTE* maxOffset;
     BYTE* threadLockOffset = NULL;
 
     if (SpinLock(&gSpinLock1) == 259)

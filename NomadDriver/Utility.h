@@ -126,7 +126,7 @@ public:
 	UINT32 GetThreadLockOffset();
 	UINT32 SpinLock(volatile signed __int64* Lock);
 	UINT32 GetKernelStackOffset();
-	__int64 GetInitialStackOffset();
+	UINT32 GetInitialStackOffset();
 	UINT32 GetStackBaseOffset();
 	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql);
 	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ unsigned int **outOffset, _In_ UINT32 range);
@@ -157,12 +157,12 @@ private:
 
 	PRTL_PROCESS_MODULES outProcMods = NULL;
 
-	UINT64 gkThreadStateOffset = 0;
-	UINT64 gThreadLockOffset = 0;
-	UINT64 gKernelStackOffset = 0;
-	UINT64 gInitialStackOffset = 0;
-	UINT64 gStackBaseOffset = 0;
-	UINT64 gThreadStackLimit = 0;
+	UINT32 gkThreadStateOffset = 0;
+	UINT32 gThreadLockOffset = 0;
+	UINT32 gKernelStackOffset = 0;
+	UINT32 gInitialStackOffset = 0;
+	UINT32 gStackBaseOffset = 0;
+	UINT32 gThreadStackLimit = 0;
 
 	volatile signed long long gSpinLock1 = 0;
 	volatile signed long long gSpinLock2 = 0;
