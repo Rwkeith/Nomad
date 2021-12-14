@@ -425,28 +425,34 @@ BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * Irql)
     }
 }
 
+/// <summary>
+/// Get offset of Tcb.StackLimit from ETHREAD
+/// </summary>
+/// <returns>offset on success</returns>
 UINT64 Utility::GetThreadStackLimit()
 {
-    PETHREAD thisKThread;
-    unsigned __int64 v2;
-    _QWORD* v3;
+    PETHREAD thisThread;
+    UINT64 currThreadStackLimit;
+    UINT64* currThreadAddr;
+    USHORT maxOffset = 0x2F8;
 
-    thisKThread = (PETHREAD)__readgsqword(0x188);
+    thisThread = (PETHREAD)__readgsqword(0x188);
     if (SpinLock(&gSpinLock6) == 259)
     {
-        v2 = (__int64)pPsGetCurrentThreadStackLimit();
-        v3 = (_QWORD*)thisKThread;
-        if ((BYTE*)thisKThread < ((BYTE*)thisKThread + 0x2F8))
+        currThreadStackLimit = (UINT64)pPsGetCurrentThreadStackLimit();
+        currThreadAddr = (UINT64*)thisThread;
+        if ((UINT64)thisThread < ((UINT64)thisThread + maxOffset))
         {
-            while (*v3 != v2)
+            while (*currThreadAddr != currThreadStackLimit)
             {
-                if ((unsigned __int64)++v3 >= ((UINT64)thisKThread + 0x2F8))
-                    goto LABEL_9;
+                if ((UINT64)++currThreadAddr >= ((UINT64)thisThread + maxOffset))
+                {
+                    _InterlockedExchange64(&gSpinLock6, 2);
+                    return gThreadStackLimit;
+                }
             }
-            gThreadStackLimit = (UINT64)v3 - (UINT64)thisKThread;
+            gThreadStackLimit = (UINT64)currThreadAddr - (UINT64)thisThread;
         }
-    LABEL_9:
-        _InterlockedExchange64(&gSpinLock6, 2);
     }
     return gThreadStackLimit;
 }
