@@ -254,40 +254,40 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
 
 UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer)
 {
-    size_t copiedSize = 0;
-    size_t threadStateOffset;
-    size_t kernelStackOffset;
-    size_t threadStackBaseOffset;
-    size_t threadStackBase;
-    size_t threadStackLimitOffset;
-    size_t threadStackLimit;
+    UINT32 copiedSize = 0;
+    UINT32 threadStateOffset;
+    UINT32 kernelStackOffset;
+    UINT32 threadStackBaseOffset;
+    UINT32 threadStackLimitOffset;
+    UINT32 threadLockOffset;
+    UINT64 threadStackBase;
+    UINT64 threadStackLimit;
     bool isSystemThread;
     void** pKernelStack;
-    UINT32 threadLockOffset;
     KSPIN_LOCK* threadLock;
     KIRQL oldIrql;
 
     threadStateOffset = GetThreadStateOffset();
-    LogInfo("\t\t\tthreadStateOffset: 0x%llx", threadStateOffset);
+    LogInfo("\t\t\tthreadStateOffset: 0x%lx", threadStateOffset);
     kernelStackOffset = GetKernelStackOffset();
-    LogInfo("\t\t\tkernelStackOffset: 0x%llx", kernelStackOffset);
+    LogInfo("\t\t\tkernelStackOffset: 0x%lx", kernelStackOffset);
     threadStackBaseOffset = GetStackBaseOffset();
-    LogInfo("\t\t\tthreadStackBaseOffset: 0x%llx", threadStackBaseOffset);
+    LogInfo("\t\t\tthreadStackBaseOffset: 0x%lx", threadStackBaseOffset);
 
     if (threadObject && threadStackBaseOffset)
-        threadStackBase = *(_QWORD*)(threadStackBaseOffset + (BYTE*)threadObject);
+        threadStackBase = *(UINT64*)(threadStackBaseOffset + (UINT64)threadObject);
     else
         threadStackBase = 0;
 
     threadStackLimitOffset = GetThreadStackLimit();
-    LogInfo("\t\t\tthreadStackLimitOffset: 0x%llx", threadStackLimitOffset);
+    LogInfo("\t\t\tthreadStackLimitOffset: 0x%lx", threadStackLimitOffset);
     if (!threadObject)
     {
         LogError("\t\t\tCopyThreadKernelStack(): threadObject == NULL");
         return 0;
     }
 
-    threadStackLimit = threadStackLimitOffset ? *(_QWORD*)(threadStackLimitOffset + (BYTE*)threadObject) : 0;
+    threadStackLimit = threadStackLimitOffset ? *(UINT64*)(threadStackLimitOffset + (UINT64)threadObject) : 0;
     isSystemThread = pPsIsSystemThread ? pPsIsSystemThread(threadObject) : 0;
 
     if (!isSystemThread
@@ -357,8 +357,7 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
             threadLockOffset = GetThreadLockOffset();
             LogInfo("\t\t\tthreadLockOffset: 0x%lx", threadLockOffset);
             threadLock = (KSPIN_LOCK*)((BYTE*)threadObject + threadLockOffset);
-            //signed __int64 rightExpression = -(signed __int64)(threadLockOffset != 0);
-            //threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
+
             if (threadLockOffset)
             {
                 if (threadLock != 0)
@@ -441,9 +440,9 @@ UINT32 Utility::GetThreadStackLimit()
     UINT64* currThreadAddr;
     USHORT maxOffset = 0x2F8;
 
-    thisThread = (PETHREAD)__readgsqword(0x188);
     if (SpinLock(&gSpinLock6) == 259)
     {
+        thisThread = (PETHREAD)__readgsqword(0x188);
         currThreadStackLimit = (UINT64)pPsGetCurrentThreadStackLimit();
         currThreadAddr = (UINT64*)thisThread;
         if ((UINT64)thisThread < ((UINT64)thisThread + maxOffset))
@@ -549,9 +548,9 @@ UINT32 Utility::GetInitialStackOffset()
     UINT64* currThreadAddr;
     USHORT maxOffset = 0x2F8;
 
-    thisThread = (PETHREAD)__readgsqword(0x188);
     if (SpinLock(&gSpinLock2) == 259)
     {
+        thisThread = (PETHREAD)__readgsqword(0x188);
         initialStack = (UINT64)IoGetInitialStack();
         currThreadAddr = (UINT64*)thisThread;
         
