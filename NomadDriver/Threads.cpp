@@ -263,8 +263,7 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
     size_t threadStackLimit;
     bool isSystemThread;
     void** pKernelStack;
-    __int64 _oldIrql;
-    __int64 threadLockOffset;
+    UINT32 threadLockOffset;
     KSPIN_LOCK* threadLock;
     KIRQL oldIrql;
 
@@ -306,7 +305,6 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
 
     pKernelStack = (void**)((BYTE*)threadObject + kernelStackOffset);
     memset(outStackBuffer, 0, 0x2000);
-    LogInfo("Thread State before locking");
     if (LockThread((PKTHREAD)threadObject, &oldIrql))
     {
         PHYSICAL_ADDRESS physAddr = MmGetPhysicalAddress(*pKernelStack);
@@ -357,19 +355,21 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
         if (SharedUserData->NtMajorVersion >= 6 && SharedUserData->NtMajorVersion != 6 || !SharedUserData->NtMinorVersion)  //  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
         {
             threadLockOffset = GetThreadLockOffset();
-            LogInfo("\t\t\tthreadLockOffset: 0x%llx", threadLockOffset);
-            BYTE* newthreadLock = (BYTE*)threadObject + threadLockOffset;
-            signed __int64 rightExpression = -(signed __int64)(threadLockOffset != 0);
-            threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
-            if (threadLock != 0)
+            LogInfo("\t\t\tthreadLockOffset: 0x%lx", threadLockOffset);
+            threadLock = (KSPIN_LOCK*)((BYTE*)threadObject + threadLockOffset);
+            //signed __int64 rightExpression = -(signed __int64)(threadLockOffset != 0);
+            //threadLock = (KSPIN_LOCK*)((unsigned __int64)newthreadLock & rightExpression);
+            if (threadLockOffset)
             {
-                KeReleaseSpinLockFromDpcLevel(threadLock);
-                __writecr8(oldIrql);
+                if (threadLock != 0)
+                {
+                    KeReleaseSpinLockFromDpcLevel(threadLock);
+                    __writecr8(oldIrql);
+                }
             }
         }
         else
         {
-            LOBYTE(_oldIrql) = oldIrql;
             KeReleaseQueuedSpinLock(0, oldIrql);
         }
     }
@@ -380,8 +380,13 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
     return copiedSize;
 }
 
-_Success_(return)
-BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * Irql)
+/// <summary>
+/// Acquires a spinlock from a thread.  
+/// </summary>
+/// <param name="Thread">the thread we are acquiring a spinlock from</param>
+/// <param name="Irql">old irql</param>
+/// <returns>returns true when acquiring thread spinlock</returns>
+_Success_(return) BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * Irql)
 {
     KIRQL currentIrql;
     UINT64 ThreadLockOffset;
@@ -429,7 +434,7 @@ BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * Irql)
 /// Get offset of Tcb.StackLimit from ETHREAD
 /// </summary>
 /// <returns>offset on success</returns>
-UINT64 Utility::GetThreadStackLimit()
+UINT32 Utility::GetThreadStackLimit()
 {
     PETHREAD thisThread;
     UINT64 currThreadStackLimit;
@@ -454,6 +459,7 @@ UINT64 Utility::GetThreadStackLimit()
             gThreadStackLimit = (UINT64)currThreadAddr - (UINT64)thisThread;
         }
     }
+    _InterlockedExchange64(&gSpinLock6, 2);
     return gThreadStackLimit;
 }
 
@@ -471,10 +477,11 @@ UINT32 Utility::GetKernelStackOffset()
     UINT64* currThreadAddr;
     _LARGE_INTEGER interval;
     UINT64 stackBase;
-    USHORT maxOffset;
+    USHORT maxOffset = 0x2F8;
 
     thisThread = (PETHREAD)__readgsqword(0x188);
     initialStackOffset = GetInitialStackOffset();
+
     stackBaseOffset = GetStackBaseOffset();
     
     if (thisThread)
@@ -513,7 +520,6 @@ UINT32 Utility::GetKernelStackOffset()
                 KeDelayExecutionThread(KernelMode, FALSE, &interval);
             }
             currThreadAddr = (UINT64*)thisThread;
-            maxOffset = 0x2F8;
             while ((UINT64)currThreadAddr < ((UINT64)thisThread + maxOffset))
             {
                 if (((UINT64)currThreadAddr - (UINT64)thisThread) != initialStackOffset)
@@ -548,19 +554,18 @@ UINT32 Utility::GetInitialStackOffset()
     {
         initialStack = (UINT64)IoGetInitialStack();
         currThreadAddr = (UINT64*)thisThread;
-        if ((UINT64)thisThread < (UINT64)thisThread + maxOffset)
+        
+        while (*currThreadAddr != initialStack)
         {
-            while (*currThreadAddr != initialStack)
+            if ((UINT64)++currThreadAddr >= (UINT64)thisThread + maxOffset)
             {
-                if ((UINT64)++currThreadAddr >= (UINT64)thisThread + maxOffset)
-                {
-                    _InterlockedExchange64(&gSpinLock2, 2);
-                    return gInitialStackOffset;
-                }
+                _InterlockedExchange64(&gSpinLock2, 2);
+                return FAIL;
             }
-            gInitialStackOffset = (UINT64)currThreadAddr - (UINT64)thisThread;
         }
+        gInitialStackOffset = (UINT64)currThreadAddr - (UINT64)thisThread;
     }
+    _InterlockedExchange64(&gSpinLock2, 2);
     return gInitialStackOffset;
 }
 
@@ -574,26 +579,24 @@ UINT32 Utility::GetStackBaseOffset()
     PVOID stackBase;
     UINT64* kThreadStackBaseAddr;
 
-    kThread = (PETHREAD)__readgsqword(0x188);
     if (SpinLock(&gSpinLock5) == 259)
     {
+        kThread = (PETHREAD)__readgsqword(0x188);
         stackBase = pPsGetCurrentThreadStackBase();
         kThreadStackBaseAddr = (UINT64*)kThread;
-        if ((UINT64)kThread < ((UINT64)kThread + 0x2F8))
+        
+        while (*kThreadStackBaseAddr != (UINT64)stackBase)
         {
-            while (*kThreadStackBaseAddr != (UINT64)stackBase)
+            if ((UINT64)++kThreadStackBaseAddr >= (UINT64)kThread + 0x2F8)
             {
-                if ((UINT64)++kThreadStackBaseAddr >= (UINT64)kThread + 0x2F8)
-                {
-                    LogInfo("\t\t\tUnable to find Stack Base Offset.");
-                    _InterlockedExchange64(&gSpinLock5, 2);
-                    return FAIL;
-                }
+                LogInfo("\t\t\tUnable to find Stack Base Offset.");
+                _InterlockedExchange64(&gSpinLock5, 2);
+                return FAIL;
             }
-            gStackBaseOffset = (UINT64)kThreadStackBaseAddr - (UINT64)kThread;
-            _InterlockedExchange64(&gSpinLock5, 2);
         }
+        gStackBaseOffset = (UINT64)kThreadStackBaseAddr - (UINT64)kThread;
     }
+    _InterlockedExchange64(&gSpinLock5, 2);
     return gStackBaseOffset;
 }
 
@@ -677,9 +680,9 @@ UINT32 Utility::GetThreadStateOffset()
 /// <param name="outOffset">if successful, initialized with offset</param>
 /// <param name="range">length to scan</param>
 /// <returns>1 on success</returns>
-BOOLEAN Utility::threadLockPatternMatch(_In_ BYTE* address, _Inout_ unsigned __int8** outOffset, _In_ UINT32 range)
+BOOLEAN Utility::threadLockPatternMatch(_In_ BYTE* address, _Inout_ UINT8** outOffset, _In_ UINT32 range)
 {
-    for (BYTE* currByte = address; currByte < (address + range); currByte++)
+    for (UINT8* currByte = address; currByte < (address + range); currByte++)
     {
         if (currByte[0] == threadLockPattern[0]
             && currByte[1] == threadLockPattern[1]
@@ -689,7 +692,7 @@ BOOLEAN Utility::threadLockPatternMatch(_In_ BYTE* address, _Inout_ unsigned __i
             && currByte[6] == threadLockPattern[6]
             && currByte[7] == threadLockPattern[7])
         {
-            *outOffset = (unsigned __int8*)((BYTE*)currByte + 5);
+            *outOffset = currByte + 5;
             return SUCCESS;
         }
     }
@@ -703,7 +706,7 @@ BOOLEAN Utility::threadLockPatternMatch(_In_ BYTE* address, _Inout_ unsigned __i
 /// <param name="outOffset">if successful, initialized with offset</param>
 /// <param name="range">length to scan</param>
 /// <returns>1 on success</returns>
-BOOLEAN Utility::threadStatePatternMatch(_In_ BYTE* address, _Inout_ unsigned int** outOffset, _In_ UINT32 range)
+BOOLEAN Utility::threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32** outOffset, _In_ UINT32 range)
 {
     for (BYTE* currByte = address; currByte < (address + range); currByte++)
     {
@@ -712,7 +715,7 @@ BOOLEAN Utility::threadStatePatternMatch(_In_ BYTE* address, _Inout_ unsigned in
             && currByte[6] == threadStatePattern[6]
             && currByte[7] == threadStatePattern[7])
         {
-            *outOffset = (unsigned int*)((BYTE*)currByte + 2);
+            *outOffset = (UINT32*)((BYTE*)currByte + 2);
             return SUCCESS;
         }
     }

@@ -392,6 +392,7 @@ NTSTATUS Utility::QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* da
 
 bool Utility::CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods)
 {
+    UNREFERENCED_PARAMETER(procMods);
     RTL_PROCESS_MODULE_INFORMATION sysMod;
     for (size_t i = 0; i < outProcMods->NumberOfModules; i++)
     {

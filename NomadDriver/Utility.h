@@ -122,15 +122,15 @@ public:
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
 	__forceinline wchar_t locase_w(wchar_t c);
 	UINT32 GetThreadStateOffset();
-	UINT64 GetThreadStackLimit();
+	UINT32 GetThreadStackLimit();
 	UINT32 GetThreadLockOffset();
 	UINT32 SpinLock(volatile signed __int64* Lock);
 	UINT32 GetKernelStackOffset();
 	UINT32 GetInitialStackOffset();
 	UINT32 GetStackBaseOffset();
 	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql);
-	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ unsigned int **outOffset, _In_ UINT32 range);
-	BOOLEAN threadLockPatternMatch(_In_ BYTE* address, _Inout_ unsigned __int8** outOffset, _In_ UINT32 range);
+	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32**outOffset, _In_ UINT32 range);
+	BOOLEAN threadLockPatternMatch(_In_ BYTE* address, _Inout_ UINT8** outOffset, _In_ UINT32 range);
 	NTSTATUS ScanSystemThreads();
 	UINT64 CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer);
 	bool StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
