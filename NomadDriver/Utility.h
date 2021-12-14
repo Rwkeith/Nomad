@@ -125,7 +125,7 @@ public:
 	UINT64 GetThreadStackLimit();
 	UINT32 GetThreadLockOffset();
 	UINT32 SpinLock(volatile signed __int64* Lock);
-	__int64 GetKernelStackOffset();
+	UINT32 GetKernelStackOffset();
 	__int64 GetInitialStackOffset();
 	UINT32 GetStackBaseOffset();
 	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql);
@@ -173,7 +173,7 @@ private:
 
 	PVOID kernBase = NULL;
 
-	BYTE threadStatePattern[8] = { 0x8a, 0x83, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x05 };		// offset is 0x184 on 1903
+	BYTE threadStatePattern[8] = { 0x8a, 0x83, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x05 };		// offset is 0x184 on 2104
 	BYTE threadLockPattern[8] = {0xF0, 0x48, 0x0F, 0xBA, 0x6B, 0x00, 0x00, 0x0F};
 };
 

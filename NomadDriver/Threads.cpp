@@ -11,7 +11,7 @@ NTSTATUS Utility::ScanSystemThreads()
         return STATUS_UNSUCCESSFUL;
     }
 
-    __int64 result;
+    PEPROCESS thisEPROC;
     BOOLEAN isSystemThread = 0;
     HANDLE currentProcessId;
     PVOID systemBigPoolInformation = NULL;
@@ -24,8 +24,7 @@ NTSTATUS Utility::ScanSystemThreads()
     NTSTATUS status;
     STACKWALK_BUFFER stackwalkBuffer;
     PETHREAD threadObject;
-
-    UINT64 suspiciousThreads = 0;
+    UINT32 suspiciousThreads = 0;
 
     LogInfo("ScanSystemThreads(), Starting routine\n");
     currentProcessId = pPsGetCurrentProcessId();
@@ -41,9 +40,9 @@ NTSTATUS Utility::ScanSystemThreads()
     }
     if (isSystemThread)
     {
-        result = (long long)pPsGetCurrentProcess();
-        LogInfo("\tpPsGetCurrentProcess() returned %p\n", (VOID*)result);
-        if ((PEPROCESS)result == PsInitialSystemProcess)  // PsInitialSystemProcess is global from ntkrnl
+        thisEPROC = pPsGetCurrentProcess();
+        LogInfo("\tpPsGetCurrentProcess() returned %p\n", (VOID*)thisEPROC);
+        if (thisEPROC == PsInitialSystemProcess)  // PsInitialSystemProcess is global from ntkrnl
         {
             // Get system big pool info
             //if (!NT_SUCCESS(result = QuerySystemInformation(SystemBigPoolInformation, &systemBigPoolInformation)))
@@ -70,7 +69,6 @@ NTSTATUS Utility::ScanSystemThreads()
                     currentThreadId = 4;
                     do
                     {
-
                         status = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
 
                         if (status == STATUS_SUCCESS)
@@ -138,7 +136,7 @@ NTSTATUS Utility::ScanSystemThreads()
                     } while (currentThreadId < 0x3000);     // lol, brute force method by EAC.  Maybe there's a better way
                     if (suspiciousThreads)
                     {
-                        LogInfo("Found %llu suspicious threads!", suspiciousThreads);
+                        LogInfo("Found %lu suspicious threads!", suspiciousThreads);
                     }
                     else
                     {
@@ -453,66 +451,79 @@ UINT64 Utility::GetThreadStackLimit()
     return gThreadStackLimit;
 }
 
-__int64 Utility::GetKernelStackOffset()
+/// <summary>
+/// Get offset of Tcb.KernelStack from ETHREAD
+/// </summary>
+/// <returns>offset on success</returns>
+UINT32 Utility::GetKernelStackOffset()
 {
-    unsigned __int64 thisThread; // rbx
-    UINT64 InitialStackOffset; // ebp
-    UINT64 stackBaseOffset; // eax
-    unsigned __int64 v3; // rdi
-    unsigned __int64 v4; // rsi
-    UINT64 v5; // eax
-    unsigned __int64* v7; // rax
-    bool i; // cf
-    _LARGE_INTEGER Interval; // [rsp+40h] [rbp+8h] BYREF
-    _LARGE_INTEGER v10; // [rsp+48h] [rbp+10h] BYREF
+    PETHREAD thisThread;
+    UINT32 initialStackOffset;
+    UINT32 stackBaseOffset;
+    UINT64 stackLimit;
+    UINT64 stackLimitOffset;
+    UINT64* currThreadAddr;
+    _LARGE_INTEGER interval;
+    UINT64 stackBase;
+    USHORT maxOffset;
 
-    Interval.QuadPart = 0;
-    thisThread = __readgsqword(0x188);
-    InitialStackOffset = GetInitialStackOffset();
+    thisThread = (PETHREAD)__readgsqword(0x188);
+    initialStackOffset = GetInitialStackOffset();
     stackBaseOffset = GetStackBaseOffset();
+    
     if (thisThread)
     {
         if (stackBaseOffset)
-            v4 = *(_QWORD*)(stackBaseOffset + thisThread);
+            stackBase = *((UINT64*)(stackBaseOffset + (UINT64)thisThread));
         else
-            v4 = 0;
-        v5 = GetThreadStackLimit();
-        if (v5)
-            v3 = *(_QWORD*)(v5 + thisThread);
+            stackBase = 0;
+
+        stackLimitOffset = GetThreadStackLimit();
+        
+        if (stackLimitOffset)
+            stackLimit = *(UINT64*)(stackLimitOffset + (PBYTE)thisThread);
         else
-            v3 = 0;
+            stackLimit = 0;
     }
     else
     {
         GetThreadStackLimit();
-        v3 = 0;
-        v4 = 0;
+        stackLimit = 0;
+        stackBase = 0;
     }
-    if (KeGetCurrentIrql() > 1u)
+    
+    if (KeGetCurrentIrql() > APC_LEVEL)
         return 0;
-    if ((unsigned int)SpinLock(&gSpinLock4) == 259)
+
+    if (SpinLock(&gSpinLock4) == 259)
     {
-        if (InitialStackOffset && v3 && v4)
+        if (initialStackOffset && stackLimit && stackBase)
         {
-            if (KeDelayExecutionThread(0, 0, &Interval))
+            interval.QuadPart = 0;
+            if (KeDelayExecutionThread(KernelMode, FALSE, &interval))
             {
-                v10.QuadPart = -10000;
-                KeDelayExecutionThread(0, 0, &v10);
+                // 1 second delay
+                interval.QuadPart = -10000;
+                KeDelayExecutionThread(KernelMode, FALSE, &interval);
             }
-            v7 = (unsigned __int64*)thisThread;
-            for (i = thisThread < thisThread + 760; i; i = (unsigned __int64)v7 < thisThread + 760)
+            currThreadAddr = (UINT64*)thisThread;
+            maxOffset = 0x2F8;
+            while ((UINT64)currThreadAddr < ((UINT64)thisThread + maxOffset))
             {
-                if ((DWORD)v7 - (DWORD)thisThread != InitialStackOffset && *v7 < v4 && *v7 > v3)
+                if (((UINT64)currThreadAddr - (UINT64)thisThread) != initialStackOffset)
                 {
-                    gKernelStackOffset = (DWORD)v7 - thisThread;
-                    break;
+                    if (*currThreadAddr < stackBase && *currThreadAddr > stackLimit)
+                    {
+                        gKernelStackOffset = (UINT64)currThreadAddr - (UINT64)thisThread;
+                        break;
+                    }
                 }
-                ++v7;
+                ++currThreadAddr;
             }
         }
         _InterlockedExchange64(&gSpinLock4, 2);
     }
-    return (unsigned int)gKernelStackOffset;
+    return gKernelStackOffset;
 }
 
 __int64 Utility::GetInitialStackOffset()
@@ -581,7 +592,7 @@ UINT32 Utility::GetStackBaseOffset()
 UINT32 Utility::GetThreadLockOffset()
 {
     BYTE* maxOffset;
-    BYTE* threadLockOffset;
+    BYTE* threadLockOffset = NULL;
 
     if (SpinLock(&gSpinLock1) == 259)
     {
@@ -609,7 +620,7 @@ UINT32 Utility::GetThreadLockOffset()
 /// <returns>byte offset of thread state from base of ETHREAD</returns>
 UINT32 Utility::GetThreadStateOffset()
 {
-    UINT32* threadStateOffset;
+    UINT32* threadStateOffset = NULL;
 
     if (SpinLock(&gSpinLock3) == 259)
     {
