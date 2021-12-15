@@ -163,7 +163,7 @@ NTSTATUS Utility::ScanSystemThreads()
     return STATUS_SUCCESS;
 }
 
-bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
+BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
 {
     _QWORD* stackBuffer;
     size_t copiedSize;
@@ -233,26 +233,32 @@ bool Utility::StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out
                 else
                 {
                     LogError("\t\t\tUnable to find .text section of ntoskrnl");
-                    return 0;
+                    return FAIL;
                 }
             }
             else
             {
                 LogInfo("\t\t\tCopyThreadKernelStack() copiedSize is 0");
-                return 0;
+                return FAIL;
             }
         }
         else
         {
             LogInfo("\t\t\tCopyThreadKernelStack() returned copiedSize: %llu", copiedSize);
-            return 0;
+            return FAIL;
         }
         ExFreePoolWithTag(stackBuffer, POOL_TAG);
     }
-    return 1;
+    return SUCCESS;
 }
 
-UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer)
+/// <summary>
+/// Copies the passed thread's kernel stack into a passed buffer
+/// </summary>
+/// <param name="threadObject">thread to copy kernel stack of</param>
+/// <param name="outStackBuffer">buffer that will receive stack contents</param>
+/// <returns>size that was copied</returns>
+UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer)
 {
     UINT32 copiedSize = 0;
     UINT32 threadStateOffset;
@@ -292,12 +298,12 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
 
     if (!isSystemThread
         || !outStackBuffer
-        || !(DWORD)threadStateOffset
-        || !(DWORD)kernelStackOffset
+        || !threadStateOffset
+        || !kernelStackOffset
         || !threadStackBase
         || !threadStackLimit
         || KeGetCurrentIrql() > 1
-        || (PKTHREAD)threadObject == KeGetCurrentThread())        //KeGetCurrentThread() is inlined, gs register access.
+        || (PKTHREAD)threadObject == KeGetCurrentThread())
     {
         LogInfo("\t\t\tCopyThreadKernelStack() aborted.  Examine checks.");
         return 0;
@@ -380,7 +386,7 @@ UINT64 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
 }
 
 /// <summary>
-/// Acquires a spinlock from a thread.  
+/// Acquires a spinlock from a thread.
 /// </summary>
 /// <param name="Thread">the thread we are acquiring a spinlock from</param>
 /// <param name="Irql">old irql</param>
@@ -401,7 +407,7 @@ _Success_(return) BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * I
             {
                 currentIrql = KeGetCurrentIrql();
                 LogInfo("\t\t\tCurrent IRQL: %d", currentIrql);
-                // set interrupt mask 3:0 to b1100
+                // set cr8[3:0] (interrupt mask)
                 __writecr8(0xC);
                 *Irql = currentIrql;
                 LogInfo("\t\t\tThread State before KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
@@ -659,7 +665,7 @@ UINT32 Utility::GetThreadStateOffset()
         }
         if (gkThreadStateOffset)
         {
-            auto kThreadState = *(BYTE*)((BYTE*)__readgsqword(0x188) + gkThreadStateOffset);
+            auto kThreadState = *((BYTE*)__readgsqword(0x188) + gkThreadStateOffset);
 
             if (kThreadState != KTHREAD_STATE::Running)
             {

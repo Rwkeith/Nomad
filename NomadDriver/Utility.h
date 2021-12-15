@@ -132,8 +132,8 @@ public:
 	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32**outOffset, _In_ UINT32 range);
 	BOOLEAN threadLockPatternMatch(_In_ BYTE* address, _Inout_ UINT8** outOffset, _In_ UINT32 range);
 	NTSTATUS ScanSystemThreads();
-	UINT64 CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer);
-	bool StackwalkThread(_In_ PETHREAD threadObject, CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
+	UINT32 CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer);
+	BOOLEAN StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
 
 private:
 	bool mImportFail = false;
