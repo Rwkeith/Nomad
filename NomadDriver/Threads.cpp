@@ -3,6 +3,11 @@
 #include "Driver.h"
 
 // https://www.unknowncheats.me/forum/anti-cheat-bypass/325212-eac-system-thread-detection.html
+
+/// <summary>
+/// Scans for system threads and checks if within a valid module
+/// </summary>
+/// <returns>success on no error</returns>
 NTSTATUS Utility::ScanSystemThreads()
 {
     if (mImportFail)
@@ -17,7 +22,6 @@ NTSTATUS Utility::ScanSystemThreads()
     PVOID systemBigPoolInformation = NULL;
     PRTL_PROCESS_MODULES systemModuleInformation = NULL;
     CONTEXT* context;
-    UINT64 currentThreadId = 4;
     HANDLE processID;
     PEPROCESS processObject;
 
@@ -66,8 +70,8 @@ NTSTATUS Utility::ScanSystemThreads()
                 context = (CONTEXT*)ExAllocatePoolWithTag(NonPagedPool, sizeof(CONTEXT), POOL_TAG);
                 if (context)
                 {
-                    currentThreadId = 4;
-                    do
+                    // thread id's are multiple of 4
+                    for (size_t currentThreadId = 4; currentThreadId < 0x3000; currentThreadId += 4)
                     {
                         status = pPsLookupThreadByThreadId((HANDLE)currentThreadId, &threadObject);
 
@@ -92,7 +96,7 @@ NTSTATUS Utility::ScanSystemThreads()
 
                             if (processID == currentProcessId)                                      // if...the thread's pid is the same as system pid, and threadobject 
                             {
-                                if (threadObject != (PVOID)__readgsqword(0x188))                    // __readgsqword(0x188) == return (struct _KTHREAD *)__readgsqword(0x188) , and thread obj is not our current thread
+                                if (threadObject != (PVOID)__readgsqword(0x188))                    // and thread obj is not our current thread
                                 {
                                     if (StackwalkThread(threadObject, context, &stackwalkBuffer))   // and succesfully walks the stack of thread
                                     {
@@ -132,8 +136,8 @@ NTSTATUS Utility::ScanSystemThreads()
                             }
                             ObfDereferenceObject(threadObject); // reference count was incremented by pPsLookupThreadByThreadId
                         }
-                        currentThreadId += 4;               // thread id's are multiple of 4
-                    } while (currentThreadId < 0x3000);     // lol, brute force method by EAC.  Maybe there's a better way
+                    }
+
                     if (suspiciousThreads)
                     {
                         LogInfo("Found %lu suspicious threads!", suspiciousThreads);
@@ -163,41 +167,47 @@ NTSTATUS Utility::ScanSystemThreads()
     return STATUS_SUCCESS;
 }
 
+/// <summary>
+/// Unwinds and walks the thread's stack
+/// </summary>
+/// <param name="threadObject">thread being examined</param>
+/// <param name="context"></param>
+/// <param name="stackwalkBuffer">rip/rsp entries from the stack being walked</param>
+/// <returns>1 on successful thread stack walk</returns>
 BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer)
 {
-    _QWORD* stackBuffer;
+    UINT64* stackBuffer;
     size_t copiedSize;
-    DWORD64 startRip;
-    unsigned int index;
-    unsigned __int64 rip0;
-    DWORD64 rsp0;
+    UINT64 startRip;
+    UINT64 rip;
+    UINT64 rsp;
     PRUNTIME_FUNCTION functionTableEntry;
-    __int64 moduleBase;
-    __int64 v17;
-    __int64 v18;
+    UINT64 moduleBase;
+    UINT64 establisherFrame;
+    UINT64 handlerData;
     DWORD sectionVa;
     DWORD sectionSize;
-    unsigned __int64 textBase;
+    UINT64 textBase;
 
     if (!threadObject)
-        return 0;
+        return FAIL;
     if (!stackwalkBuffer)
-        return 0;
+        return FAIL;
     memset(context, 0, sizeof(CONTEXT));
     memset(stackwalkBuffer, 0, 0x208);
 
-    stackBuffer = (_QWORD*)ExAllocatePoolWithTag(NonPagedPool, STACK_BUF_SIZE, POOL_TAG);
+    stackBuffer = (UINT64*)ExAllocatePoolWithTag(NonPagedPool, STACK_BUF_SIZE, POOL_TAG);
     if (stackBuffer)
     {
         copiedSize = CopyThreadKernelStack(threadObject, stackBuffer);
-        LogInfo("\t\t\tCopyThreadKernelStack() copiedSize is: %llu", copiedSize);
+        LogInfo("\t\t\tCopyThreadKernelStack() stackSize is: %llu", copiedSize);
         if (copiedSize)
         {
-            if (copiedSize != 4096 && copiedSize >= 0x48)
+            if (copiedSize != 0x1000 && copiedSize >= 0x48)
             {
                 if (GetNtoskrnlSection(".text", &sectionVa, &sectionSize))
                 {
-                    textBase = (unsigned __int64)((BYTE*)kernBase + sectionVa);
+                    textBase = (UINT64)((BYTE*)kernBase + sectionVa);
                     startRip = stackBuffer[7];
                     LogInfo("\t\t\tntos textBase is: 0x%llx", textBase);
                     LogInfo("\t\t\tntos textBase end is: 0x%llx", (UINT64)textBase + sectionVa);
@@ -206,28 +216,27 @@ BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* cont
                     {
                         context->Rip = startRip;
                         context->Rsp = (DWORD64)(stackBuffer + 8);
-                        index = 0;
-                        do
+                        for (size_t i = 0; i < 0x20; i++)
                         {
-                            rip0 = context->Rip;
-                            rsp0 = context->Rsp;
-                            stackwalkBuffer->Entry[stackwalkBuffer->EntryCount].RipValue = rip0;
-                            stackwalkBuffer->Entry[stackwalkBuffer->EntryCount++].RspValue = rsp0;
-                            if (rip0 < (unsigned long long)MmSystemRangeStart)
+                            rip = context->Rip;
+                            rsp = context->Rsp;
+                            stackwalkBuffer->Entry[stackwalkBuffer->EntryCount].RipValue = rip;
+                            stackwalkBuffer->Entry[stackwalkBuffer->EntryCount++].RspValue = rsp;
+                            if (rip < (UINT64)MmSystemRangeStart || rsp < (UINT64)MmSystemRangeStart)
                                 break;
-                            if (rsp0 < (unsigned long long)MmSystemRangeStart)
-                                break;
-                            functionTableEntry = pRtlLookupFunctionEntry(rip0, (PDWORD64)&moduleBase, 0);
+
+                            functionTableEntry = pRtlLookupFunctionEntry(rip, (PDWORD64)&moduleBase, 0);
+                            
                             if (!functionTableEntry)
                                 break;
-                            pRtlVirtualUnwind(0, moduleBase, context->Rip, functionTableEntry, context, (PVOID*)&v18, (PDWORD64)&v17, 0);
+                            pRtlVirtualUnwind(0, moduleBase, context->Rip, functionTableEntry, context, (PVOID*)&handlerData, (PDWORD64)&establisherFrame, 0);
+                            
                             if (!context->Rip)
                             {
                                 stackwalkBuffer->Succeeded = 1;
                                 break;
                             }
-                            ++index;
-                        } while (index < 0x20);
+                        }
                     }
                 }
                 else
@@ -238,13 +247,13 @@ BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* cont
             }
             else
             {
-                LogInfo("\t\t\tCopyThreadKernelStack() copiedSize is 0");
+                LogInfo("\t\t\tCopyThreadKernelStack() stackSize is 0");
                 return FAIL;
             }
         }
         else
         {
-            LogInfo("\t\t\tCopyThreadKernelStack() returned copiedSize: %llu", copiedSize);
+            LogInfo("\t\t\tCopyThreadKernelStack() returned stackSize: %llu", copiedSize);
             return FAIL;
         }
         ExFreePoolWithTag(stackBuffer, POOL_TAG);
@@ -256,17 +265,17 @@ BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* cont
 /// Copies the passed thread's kernel stack into a passed buffer
 /// </summary>
 /// <param name="threadObject">thread to copy kernel stack of</param>
-/// <param name="outStackBuffer">buffer that will receive stack contents</param>
+/// <param name="outStackBuffer">buffer that receives stack contents</param>
 /// <returns>size that was copied</returns>
 UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer)
 {
-    UINT32 copiedSize = 0;
+    UINT32 stackSize = 0;
     UINT32 threadStateOffset;
     UINT32 kernelStackOffset;
     UINT32 threadStackBaseOffset;
     UINT32 threadStackLimitOffset;
     UINT32 threadLockOffset;
-    UINT64 threadStackBase;
+    UINT64 stackBase;
     UINT64 threadStackLimit;
     bool isSystemThread;
     void** pKernelStack;
@@ -281,9 +290,9 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
     LogInfo("\t\t\tthreadStackBaseOffset: 0x%lx", threadStackBaseOffset);
 
     if (threadObject && threadStackBaseOffset)
-        threadStackBase = *(UINT64*)(threadStackBaseOffset + (UINT64)threadObject);
+        stackBase = *(UINT64*)(threadStackBaseOffset + (UINT64)threadObject);
     else
-        threadStackBase = 0;
+        stackBase = 0;
 
     threadStackLimitOffset = GetThreadStackLimit();
     LogInfo("\t\t\tthreadStackLimitOffset: 0x%lx", threadStackLimitOffset);
@@ -300,7 +309,7 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
         || !outStackBuffer
         || !threadStateOffset
         || !kernelStackOffset
-        || !threadStackBase
+        || !stackBase
         || !threadStackLimit
         || KeGetCurrentIrql() > 1
         || (PKTHREAD)threadObject == KeGetCurrentThread())
@@ -310,7 +319,7 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
     }
 
     pKernelStack = (void**)((BYTE*)threadObject + kernelStackOffset);
-    memset(outStackBuffer, 0, 0x2000);
+    memset(outStackBuffer, 0, STACK_BUF_SIZE);
     if (LockThread((PKTHREAD)threadObject, &oldIrql))
     {
         PHYSICAL_ADDRESS physAddr = MmGetPhysicalAddress(*pKernelStack);
@@ -321,14 +330,14 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
             {
                 if ((UINT64)*pKernelStack > threadStackLimit)
                 {
-                    if ((UINT64)*pKernelStack < threadStackBase)
+                    if ((UINT64)*pKernelStack < stackBase)
                     {
                         if (physAddr.QuadPart)
                         {
-                            copiedSize = threadStackBase - (_QWORD)*pKernelStack;
-                            if (copiedSize > 0x2000)
-                                copiedSize = 0x2000;
-                            memmove(outStackBuffer, *pKernelStack, copiedSize);
+                            stackSize = stackBase - (_QWORD)*pKernelStack;
+                            if (stackSize > STACK_BUF_SIZE)
+                                stackSize = STACK_BUF_SIZE;
+                            memmove(outStackBuffer, *pKernelStack, stackSize);
                         }
                         else
                         {
@@ -338,12 +347,12 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
                     }
                     else
                     {
-                        LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *pKernelStack >= threadStackBase");
+                        LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *pKernelStack >= stackBase");
                     }
                 }
                 else
                 {
-                    LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *pKernelStack >= threadStackBase");
+                    LogInfo("\t\t\tCopyThreadKernelStack() aborted.  *pKernelStack >= stackBase");
                 }
 
             }
@@ -382,7 +391,7 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
     {
         LogError("\t\t\tCopyThreadKernelStack(), LockThread() failed.  Examine.");
     }
-    return copiedSize;
+    return stackSize;
 }
 
 /// <summary>

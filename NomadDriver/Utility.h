@@ -76,14 +76,16 @@ typedef struct _IMAGE_RUNTIME_FUNCTION_ENTRY {
 } RUNTIME_FUNCTION, * PRUNTIME_FUNCTION, _IMAGE_RUNTIME_FUNCTION_ENTRY, * _PIMAGE_RUNTIME_FUNCTION_ENTRY;
 
 typedef struct _STACKWALK_ENTRY {
-	_QWORD RipValue;
-	_QWORD RspValue;
+	UINT64 RipValue;
+	UINT64 RspValue;
 } STACKWALK_ENTRY, *PSTACKWALK_ENTRY;
+
+constexpr int entries = (STACK_BUF_SIZE - sizeof(UINT32) - sizeof(bool)) / sizeof(STACKWALK_ENTRY);
 
 typedef struct _STACKWALK_BUFFER {
 	bool Succeeded = 0;
 	UINT32 EntryCount = 0;
-	STACKWALK_ENTRY Entry[(STACK_BUF_SIZE - sizeof(UINT32)) / sizeof(STACKWALK_ENTRY)];	// (STACK_BUF_SIZE - sizeof(EntryCount)) / sizeof(DWORD)
+	STACKWALK_ENTRY Entry[entries];
 } STACKWALK_BUFFER, * PSTACKWALK_BUFFER;
 
 typedef void (*GenericFuncPtr)();
@@ -164,6 +166,8 @@ private:
 	UINT32 gStackBaseOffset = 0;
 	UINT32 gThreadStackLimit = 0;
 
+	PVOID kernBase = NULL;
+
 	volatile signed long long gSpinLock1 = 0;
 	volatile signed long long gSpinLock2 = 0;
 	volatile signed long long gSpinLock3 = 0;
@@ -171,7 +175,7 @@ private:
 	volatile signed long long gSpinLock5 = 0;
 	volatile signed long long gSpinLock6 = 0;
 
-	PVOID kernBase = NULL;
+	
 
 	BYTE threadStatePattern[8] = { 0x8a, 0x83, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x05 };		// offset is 0x184 on 2104
 	BYTE threadLockPattern[8] = {0xF0, 0x48, 0x0F, 0xBA, 0x6B, 0x00, 0x00, 0x0F};

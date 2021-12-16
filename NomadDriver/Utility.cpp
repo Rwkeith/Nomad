@@ -437,8 +437,6 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
     }
 
     auto ntSection = reinterpret_cast<PIMAGE_SECTION_HEADER>((BYTE*)ntHeader + sizeof(IMAGE_NT_HEADERS64));
-    //LogInfo("\t\t\tntHeader->FileHeader.Machine: 0x%hx", ntHeader->FileHeader.Machine);
-    //LogInfo("\t\t\tntHeader->FileHeader.NumberOfSections: 0x%hx", ntHeader->FileHeader.NumberOfSections);
 
     for (size_t i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
     {
@@ -451,10 +449,6 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
             LogInfo("\t\t\tfound %s in ntoskrnl.exe at %p , size %lu", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
             return true;
         }
-        //else
-        //{
-        //    LogInfo("\t\t\No match, ntSection[%llu] = %p ; ntSection[%llu].Name: %s != %s .  VirtualAddress: 0x%lx ", i, &ntSection[i], i, ntSection[i].Name, sectionName, ntSection[i].VirtualAddress);
-        //}
     }
     LogInfo("\t\t\tfailed to find %s in ntoskrnl.exe", sectionName);
     return false;
