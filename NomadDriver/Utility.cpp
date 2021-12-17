@@ -326,8 +326,12 @@ PVOID Utility::GetNtoskrnlBaseAddress()
     return reinterpret_cast<void*>(pageInNtoskrnl);
 }
 
-//wrapper for ZwQuerySysInfo
-// for now we want PSYSTEM_BIGPOOL_INFORMATION
+/// <summary>
+/// Wrapper for ZwQuerySystemInformation
+/// </summary>
+/// <param name="infoClass">type of query</param>
+/// <param name="dataBuf">query data buffer</param>
+/// <returns>NTSTATUS success on success</returns>
 NTSTATUS Utility::QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* dataBuf) /*, 0x100000, 0x2000000) <- ?? */
 {
     if (!dataBuf)
@@ -390,7 +394,13 @@ NTSTATUS Utility::QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* da
     return STATUS_SUCCESS;
 }
 
-bool Utility::CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods)
+/// <summary>
+/// Checks if given address is within any module reported from ZwQueryInfo
+/// </summary>
+/// <param name="address">address to check</param>
+/// <param name="procMods">unused, using global for now</param>
+/// <returns></returns>
+BOOLEAN Utility::CheckModulesForAddress(_In_ UINT64 address, _In_ PRTL_PROCESS_MODULES procMods)
 {
     UNREFERENCED_PARAMETER(procMods);
     RTL_PROCESS_MODULE_INFORMATION sysMod;
@@ -401,14 +411,21 @@ bool Utility::CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMo
         if ((UINT64)sysMod.ImageBase < address && address < ((UINT64)sysMod.ImageBase + sysMod.ImageSize))
         {
             LogInfo("\t\t\tAddress is within system module:  sysMod.ImageBase: 0x%p , sysMod.MaxAddr: 0x%llx", sysMod.ImageBase, ((UINT64)sysMod.ImageBase + sysMod.ImageSize));
-            return true;
+            return SUCCESS;
         }
     }
     LogInfo("\t\t\tDetected! Address NOT within system module:  address: 0x%llx", address);
-    return false;
+    return FAIL;
 }
 
-bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sectionSize)
+/// <summary>
+/// Locates a given section in ntoskrnl
+/// </summary>
+/// <param name="sectionName">section to locate</param>
+/// <param name="sectionVa">RVA from section base</param>
+/// <param name="sectionSize">Virtual size</param>
+/// <returns>1 on success</returns>
+BOOLEAN Utility::GetNtoskrnlSection(_In_ char* sectionName, _Out_ DWORD* sectionVa, _Out_ DWORD* sectionSize)
 {
     if (!kernBase)
     {
@@ -418,7 +435,7 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_magic != E_MAGIC)
     {
         LogInfo("\t\t\tGetNtoskrnlSection() expected MZ header != 0x%02x @ %p", E_MAGIC, kernBase);
-        return FALSE;
+        return FAIL;
     }
 
     const auto ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS64>((BYTE*)kernBase + reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_lfanew);
@@ -427,13 +444,13 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
     if (reinterpret_cast<PIMAGE_DOS_HEADER>(kernBase)->e_lfanew > 0x1000)
     {
         LogInfo("\t\t\tGetNtoskrnlSection() pHead->e_lfanew > 0x1000 , doesn't seem valid @ 0x%p", kernBase);
-        return FALSE;
+        return FAIL;
     }
 
     if (ntHeader->Signature != NT_HDR_SIG)
     {
         LogInfo("\t\t\tGetNtoskrnlSection() ntHeader->Signature != 0x%02x @ 0x%p", NT_HDR_SIG, kernBase);
-        return FALSE;
+        return FAIL;
     }
 
     auto ntSection = reinterpret_cast<PIMAGE_SECTION_HEADER>((BYTE*)ntHeader + sizeof(IMAGE_NT_HEADERS64));
@@ -447,14 +464,14 @@ bool Utility::GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sec
             *sectionVa = ntSection[i].VirtualAddress;
             *sectionSize = ntSection[i].Misc.VirtualSize;
             LogInfo("\t\t\tfound %s in ntoskrnl.exe at %p , size %lu", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
-            return true;
+            return SUCCESS;
         }
     }
     LogInfo("\t\t\tfailed to find %s in ntoskrnl.exe", sectionName);
-    return false;
+    return FAIL;
 }
 
-UINT32 Utility::SpinLock(volatile signed __int64* Lock)
+UINT32 Utility::SpinLock(_In_ volatile signed __int64* Lock)
 {
     if (*Lock != 2)
     {
@@ -464,6 +481,14 @@ UINT32 Utility::SpinLock(volatile signed __int64* Lock)
             _mm_pause();
     }
     return 0;
+}
+
+void Utility::Sleep(_In_ LONG milliseconds)
+{
+    LARGE_INTEGER interval;
+    interval.QuadPart = -(10000ll * milliseconds);
+
+    KeDelayExecutionThread(KernelMode, FALSE, &interval);
 }
 
 

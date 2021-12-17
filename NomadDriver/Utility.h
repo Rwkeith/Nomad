@@ -115,27 +115,32 @@ public:
 	NTSTATUS ImportNtPrimitives();
 	bool IsValidPEHeader(_In_ const uintptr_t head);
 	BOOLEAN IsWindows7();
-	bool CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods);
+	
 	PVOID GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject);
 	NTSTATUS FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer);
 	PVOID GetNtoskrnlBaseAddress();
-	bool GetNtoskrnlSection(char* sectionName, DWORD* sectionVa, DWORD* sectionSize);
+	
 	NTSTATUS QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* dataBuf);
 	int	strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2);
+	
 	__forceinline wchar_t locase_w(wchar_t c);
-	UINT32 GetThreadStateOffset();
+	BOOLEAN CheckModulesForAddress(UINT64 address, PRTL_PROCESS_MODULES procMods);
+	BOOLEAN GetNtoskrnlSection(_In_ char* sectionName, _Out_ DWORD* sectionVa, _Out_ DWORD* sectionSize);
+	UINT32 SpinLock(_In_ volatile signed __int64* Lock);
+	void Sleep(_In_ LONG miliseconds);
+	
+	NTSTATUS ScanSystemThreads();
+	BOOLEAN StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
+	UINT32 CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer);
+	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * Irql);
 	UINT32 GetThreadStackLimit();
-	UINT32 GetThreadLockOffset();
-	UINT32 SpinLock(volatile signed __int64* Lock);
+	UINT32 GetThreadStateOffset();
 	UINT32 GetKernelStackOffset();
 	UINT32 GetInitialStackOffset();
 	UINT32 GetStackBaseOffset();
-	_Success_(return) BOOL LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL* Irql);
-	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32**outOffset, _In_ UINT32 range);
+	UINT32 GetThreadLockOffset();
 	BOOLEAN threadLockPatternMatch(_In_ BYTE* address, _Inout_ UINT8** outOffset, _In_ UINT32 range);
-	NTSTATUS ScanSystemThreads();
-	UINT32 CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* outStackBuffer);
-	BOOLEAN StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* context, _Out_ STACKWALK_BUFFER* stackwalkBuffer);
+	BOOLEAN threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32**outOffset, _In_ UINT32 range);
 
 private:
 	bool mImportFail = false;
