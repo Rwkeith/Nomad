@@ -9,3 +9,7 @@ Uses known heuristic detection methods to find manulaly mapped kernel code and s
 - Check thread entry points
 
 <img src="NomadOutput.png" width="600" height="300">
+
+# Credits
+- ApexLegendsUC (anti-cheat-emulator)
+- Credits not listed here are in code comments
