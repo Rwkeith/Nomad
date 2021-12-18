@@ -130,10 +130,10 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
 NTSTATUS Utility::ImportNtPrimitives()
 {
     LogInfo("Importing windows primitives\n");
-    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation" , L"PsGetCurrentProcessId", L"PsIsSystemThread", L"PsGetCurrentProcess", 
-                                            L"IoThreadToProcess", L"PsGetProcessId", L"RtlVirtualUnwind", L"RtlLookupFunctionEntry", 
-                                            L"KeAlertThread", L"PsGetCurrentThreadStackBase", L"PsGetCurrentThreadStackLimit", L"KeAcquireQueuedSpinLockRaiseToSynch", 
-                                            L"KeReleaseQueuedSpinLock", L"PsLookupThreadByThreadId"};
+    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation",    L"PsGetCurrentProcessId",       L"PsIsSystemThread",             L"PsGetCurrentProcess", 
+                                            L"IoThreadToProcess",           L"PsGetProcessId",              L"RtlVirtualUnwind",             L"RtlLookupFunctionEntry", 
+                                            L"KeAlertThread",               L"PsGetCurrentThreadStackBase", L"PsGetCurrentThreadStackLimit", L"KeAcquireQueuedSpinLockRaiseToSynch", 
+                                            L"KeReleaseQueuedSpinLock",     L"PsLookupThreadByThreadId",    L"NtQueryInformationThread"};
     UNICODE_STRING uniNames[WINAPI_IMPORT_COUNT];
 
     for (size_t i = 0; i < WINAPI_IMPORT_COUNT; i++)
@@ -172,6 +172,7 @@ NTSTATUS Utility::ImportNtPrimitives()
     pKeAcquireQueuedSpinLockRaiseToSynch = (KeAcquireQueuedSpinLockRaiseToSynchPtr)pNtPrimitives[_KeAcquireQueuedSpinLockRaiseToSynchIDX];
     pKeReleaseQueuedSpinLock = (KeReleaseQueuedSpinLockPtr)pNtPrimitives[_KeReleaseQueuedSpinLockIDX];
     pPsLookupThreadByThreadId = (PsLookupThreadByThreadIdPtr)pNtPrimitives[_PsLookupThreadByThreadIdIDX];
+    pNtQueryInformationThread = (NtQueryInformationThreadPtr)pNtPrimitives[_NtQueryInformationThreadIDX];
 
     return STATUS_SUCCESS;
 }
@@ -223,7 +224,7 @@ BOOLEAN Utility::IsWindows7()
 
 // @ weak1337
 // https://github.com/weak1337/EvCommunication/blob/cab42dda45a5feb9d2c62f8685d00b0d39fb783e/Driver/Driver/nt.cpp
-NTSTATUS Utility::FindExport(_In_ const uintptr_t imageBase, const char* exportName, uintptr_t* functionPointer)
+NTSTATUS Utility::FindExport(_In_ const uintptr_t imageBase, _In_ const char* exportName, _Out_ uintptr_t* functionPointer)
 {
     if (!imageBase)
         return STATUS_INVALID_PARAMETER_1;
@@ -425,7 +426,7 @@ BOOLEAN Utility::CheckModulesForAddress(_In_ UINT64 address, _In_ PRTL_PROCESS_M
 /// <param name="sectionVa">RVA from section base</param>
 /// <param name="sectionSize">Virtual size</param>
 /// <returns>1 on success</returns>
-BOOLEAN Utility::GetNtoskrnlSection(_In_ char* sectionName, _Out_ DWORD* sectionVa, _Out_ DWORD* sectionSize)
+_Success_(return) BOOLEAN Utility::GetNtoskrnlSection(_In_ char* sectionName, _Out_ DWORD* sectionVa, _Out_ DWORD* sectionSize)
 {
     if (!kernBase)
     {
@@ -483,12 +484,12 @@ UINT32 Utility::SpinLock(_In_ volatile signed __int64* Lock)
     return 0;
 }
 
-void Utility::Sleep(_In_ LONG milliseconds)
+NTSTATUS Utility::Sleep(_In_ LONG milliseconds)
 {
     LARGE_INTEGER interval;
-    interval.QuadPart = -(10000ll * milliseconds);
+    interval.QuadPart = -(10ll * milliseconds);
 
-    KeDelayExecutionThread(KernelMode, FALSE, &interval);
+    return KeDelayExecutionThread(KernelMode, FALSE, &interval);
 }
 
 

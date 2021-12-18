@@ -49,11 +49,11 @@ NTSTATUS Utility::ScanSystemThreads()
         if (thisEPROC == PsInitialSystemProcess)  // PsInitialSystemProcess is global from ntkrnl
         {
             // Get system big pool info
-            //if (!NT_SUCCESS(result = QuerySystemInformation(SystemBigPoolInformation, &systemBigPoolInformation)))
-            //{
-            //    LogError("\tQuerySystemInformation(SystemBigPoolInformation) was unsuccessful 0x%08x\n", result);
-            //    return result;
-            //}
+            if (!NT_SUCCESS(status = QuerySystemInformation(SystemBigPoolInformation, &systemBigPoolInformation)))
+            {
+                LogError("\tQuerySystemInformation(SystemBigPoolInformation) was unsuccessful 0x%08x\n", status);
+                return status;
+            }
 
             // System != Process module info
             if (!NT_SUCCESS(status = QuerySystemInformation(SystemModuleInformation, (PVOID*)&systemModuleInformation)))
@@ -735,3 +735,32 @@ BOOLEAN Utility::threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32** ou
     }
     return FAIL;
 }
+
+NTSTATUS Utility::GetThreadStartAddr(_In_ PETHREAD threadObject, _Out_ uintptr_t* pStartAddr)
+{
+    *pStartAddr = NULL;
+    HANDLE hThread;
+    if (!NT_SUCCESS(ObOpenObjectByPointer(threadObject, OBJ_KERNEL_HANDLE, nullptr, GENERIC_READ, *PsThreadType, KernelMode, &hThread))) {
+        LogError("ObOpenObjectByPointer failed.\n");
+        return;
+    }
+    
+    uintptr_t start_addr;
+    ULONG returned_bytes;
+    
+    if (!NT_SUCCESS(pNtQueryInformationThread(hThread, ThreadQuerySetWin32StartAddress, &start_addr, sizeof(start_addr), &returned_bytes))) {
+        LogError("NtQueryInformationThread failed.\n");
+        NtClose(hThread);
+        return;
+    }
+
+    if (MmIsAddressValid((void*)start_addr)) {
+        *pStartAddr = start_addr;
+    }
+    else
+        DbgPrint("(not a detection) Invalid start addr %p.\r\n", start_addr);
+
+    NtClose(hThread);
+}
+
+//BOOLEAN IsAddressWithinBigPool(_In_ )
