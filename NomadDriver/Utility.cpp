@@ -100,6 +100,10 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
         return status;
     }
 
+    auto whatIsthisAddr = *(long long*)((int*)outProcMods + 6);
+    //LogInfo("whatIsthisAddr: %016X", outProcMods->Modules->);
+    LogInfo("whatIsthisAddr: %x", whatIsthisAddr);
+
     if (procMods != NULL)
     {
         *procMods = outProcMods;
@@ -133,7 +137,7 @@ NTSTATUS Utility::ImportNtPrimitives()
     wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation",    L"PsGetCurrentProcessId",       L"PsIsSystemThread",             L"PsGetCurrentProcess", 
                                             L"IoThreadToProcess",           L"PsGetProcessId",              L"RtlVirtualUnwind",             L"RtlLookupFunctionEntry", 
                                             L"KeAlertThread",               L"PsGetCurrentThreadStackBase", L"PsGetCurrentThreadStackLimit", L"KeAcquireQueuedSpinLockRaiseToSynch", 
-                                            L"KeReleaseQueuedSpinLock",     L"PsLookupThreadByThreadId",    L"NtQueryInformationThread"};
+                                            L"KeReleaseQueuedSpinLock",     L"PsLookupThreadByThreadId",    L"NtQueryInformationThread",     L"PsGetContextThread"};
     UNICODE_STRING uniNames[WINAPI_IMPORT_COUNT];
 
     for (size_t i = 0; i < WINAPI_IMPORT_COUNT; i++)
@@ -173,16 +177,27 @@ NTSTATUS Utility::ImportNtPrimitives()
     pKeReleaseQueuedSpinLock = (KeReleaseQueuedSpinLockPtr)pNtPrimitives[_KeReleaseQueuedSpinLockIDX];
     pPsLookupThreadByThreadId = (PsLookupThreadByThreadIdPtr)pNtPrimitives[_PsLookupThreadByThreadIdIDX];
     pNtQueryInformationThread = (NtQueryInformationThreadPtr)pNtPrimitives[_NtQueryInformationThreadIDX];
-
+    pPsGetContextThread = (PsGetContextThreadPtr)pNtPrimitives[_PsGetContextThreadIDX];
     return STATUS_SUCCESS;
 }
 
 bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
 {
     // ideally should parse the PT so this can't be IAT spoofed
+    __try
+    {
+
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        LogInfo("Exception executed for 0x%p , ExceptionCode == 0x%p", (PVOID)pHead, GetExceptionCode());
+        return false;
+    }
     if (!MmIsAddressValid((PVOID)pHead))
     {
+#ifdef VERBOSE_LOG
         LogError("Was unable to read page @ 0x%p", (PVOID)pHead);
+#endif
         return false;
     }
 
@@ -250,7 +265,7 @@ NTSTATUS Utility::FindExport(_In_ const uintptr_t imageBase, _In_ const char* ex
     return STATUS_NOT_FOUND;
 }
 
-__forceinline wchar_t Utility::locase_w(wchar_t c)
+__forceinline wchar_t Utility::locase_w(_In_ wchar_t c)
 {
     if ((c >= 'A') && (c <= 'Z'))
         return c + 0x20;
@@ -281,15 +296,23 @@ int Utility::strcmpi_w(_In_ const wchar_t* s1, _In_ const wchar_t* s2)
     return (int)(c1 - c2);
 }
 
-// @Frostiest , Driver object method
+// @Frostiest
 // https://www.unknowncheats.me/forum/general-programming-and-reversing/427419-getkernelbase.html
+
+/// <summary>
+/// Finds the kernel's base through our driver object (credits @Frostiest)
+/// </summary>
+/// <param name="DriverObject">our driver obj</param>
+/// <returns>ntoskrnl's base addr on success</returns>
 PVOID Utility::GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject)
 {
     PLDR_DATA_TABLE_ENTRY entry = (PLDR_DATA_TABLE_ENTRY)DriverObject->DriverSection;
     PLDR_DATA_TABLE_ENTRY first = entry;
+
     while ((PLDR_DATA_TABLE_ENTRY)entry->InLoadOrderLinks.Flink != first)
     {
-        if (strcmpi_w(entry->BaseDllName.Buffer, L"ntoskrnl.exe") == 0) return entry->DllBase;
+        if (strcmpi_w(entry->BaseDllName.Buffer, L"ntoskrnl.exe") == 0)
+            return entry->DllBase;
         entry = (PLDR_DATA_TABLE_ENTRY)entry->InLoadOrderLinks.Flink;
     }
     return NULL;
@@ -318,6 +341,7 @@ PVOID Utility::GetNtoskrnlBaseAddress()
     auto pageInNtoskrnl = reinterpret_cast<uintptr_t>(first_isr_address) & ~static_cast<uintptr_t>(0xfff);
 
     // Traverse pages backward until we find the PE signature (MZ) of ntoskrnl.exe in the beginning of some page.
+    Log("Current IRQL: %d", (int)KeGetCurrentIrql());
     while (!IsValidPEHeader(pageInNtoskrnl))
     {
         pageInNtoskrnl -= 0x1000;
@@ -403,19 +427,27 @@ NTSTATUS Utility::QuerySystemInformation(_In_ ULONG infoClass, _Inout_ PVOID* da
 /// <returns></returns>
 BOOLEAN Utility::CheckModulesForAddress(_In_ UINT64 address, _In_ PRTL_PROCESS_MODULES procMods)
 {
+    if (address < (UINT64)MmSystemRangeStart)
+    {
+        LogInfo("Address is not in system range: %p", (PVOID)address);
+        return SUCCESS;
+    }
+
     UNREFERENCED_PARAMETER(procMods);
     RTL_PROCESS_MODULE_INFORMATION sysMod;
     for (size_t i = 0; i < outProcMods->NumberOfModules; i++)
     {
         sysMod = outProcMods->Modules[i];
 
-        if ((UINT64)sysMod.ImageBase < address && address < ((UINT64)sysMod.ImageBase + sysMod.ImageSize))
+        if ((UINT64)sysMod.ImageBase <= address && address <= ((UINT64)sysMod.ImageBase + sysMod.ImageSize))
         {
-            LogInfo("\t\t\tAddress is within system module:  sysMod.ImageBase: 0x%p , sysMod.MaxAddr: 0x%llx", sysMod.ImageBase, ((UINT64)sysMod.ImageBase + sysMod.ImageSize));
+#ifdef VERBOSE_LOG
+            LogInfo("\t\t\tAddress %p is within system module:  sysMod.ImageBase: 0x%p , sysMod.MaxAddr: 0x%llx", (VOID*)address, sysMod.ImageBase, ((UINT64)sysMod.ImageBase + sysMod.ImageSize));
+#endif // VERBOSE_LOG
             return SUCCESS;
         }
     }
-    LogInfo("\t\t\tDetected! Address NOT within system module:  address: 0x%llx", address);
+    LogInfo("\t\t\t[SUSPICIOUS] Address NOT within system module: 0x%p", (VOID*)address);
     return FAIL;
 }
 
@@ -464,7 +496,9 @@ _Success_(return) BOOLEAN Utility::GetNtoskrnlSection(_In_ char* sectionName, _O
         {
             *sectionVa = ntSection[i].VirtualAddress;
             *sectionSize = ntSection[i].Misc.VirtualSize;
-            LogInfo("\t\t\tfound %s in ntoskrnl.exe at %p , size %lu", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
+#ifdef VERBOSE_LOG
+            LogInfo("\t\t\tfound %s in ntoskrnl.exe at VA offset 0x%08x , size %lu", sectionName, (VOID*)*sectionVa, (ULONG)*sectionSize);
+#endif
             return SUCCESS;
         }
     }
@@ -492,71 +526,40 @@ NTSTATUS Utility::Sleep(_In_ LONG milliseconds)
     return KeDelayExecutionThread(KernelMode, FALSE, &interval);
 }
 
+/// <summary>
+/// Search for pattern https://github.com/DarthTon/Blackbone/blob/a672509b5458efeb68f65436259b96fa8cd4dcfc/src/BlackBoneDrv/Utils.c#L199
+/// </summary>
+/// <param name="pattern">Pattern to search for</param>
+/// <param name="wildcard">Used wildcard</param>
+/// <param name="len">Pattern length</param>
+/// <param name="base">Base address for searching</param>
+/// <param name="size">Address range to search in</param>
+/// <param name="ppFound">Found location</param>
+/// <returns>Status code</returns>
+NTSTATUS Utility::SearchPattern(_In_ PCUCHAR pattern, _In_ UCHAR wildcard, _In_ ULONG_PTR len, _In_ const VOID* base, _In_ ULONG_PTR size, _Out_ PVOID* ppFound)
+{
+    ASSERT(ppFound != NULL && pattern != NULL && base != NULL);
+    if (ppFound == NULL || pattern == NULL || base == NULL)
+        return STATUS_INVALID_PARAMETER;
 
-    /**
-     * Checks if an address range lies within a kernel module.
-     *
-     * \param Address The beginning of the address range.
-     * \param Length The number of bytes in the address range.
-     */
-     //NTSTATUS KphValidateAddressForSystemModules(_In_ PVOID Address, _In_ SIZE_T Length)
-     // {
-     //     NTSTATUS status;
-     //     PRTL_PROCESS_MODULES modules;
-     //     ULONG i;
-     //     BOOLEAN valid;
-     // 
-     //     PAGED_CODE();
-     // 
-     //     //status = EnumKernelModuleInfo(&modules);
-     // 
-     //     if (!NT_SUCCESS(status))
-     //         return status;
-     // 
-     //     valid = FALSE;
-     // 
-     //     for (i = 0; i < modules->NumberOfModules; i++)
-     //     {
-     //         if (
-     //             (ULONG_PTR)Address + Length >= (ULONG_PTR)Address &&
-     //             (ULONG_PTR)Address >= (ULONG_PTR)modules->Modules[i].ImageBase &&
-     //             (ULONG_PTR)Address + Length <= (ULONG_PTR)modules->Modules[i].ImageBase + modules->Modules[i].ImageSize
-     //             )
-     //         {
-     //             dprintf("Validated address 0x%Ix in %s\n", Address, modules->Modules[i].FullPathName);
-     //             valid = TRUE;
-     //             break;
-     //         }
-     //     }
-     // 
-     //     ExFreePoolWithTag(modules, 'ThpK');
-     // 
-     //     if (valid)
-     //         status = STATUS_SUCCESS;
-     //     else
-     //         status = STATUS_ACCESS_VIOLATION;
-     // 
-     //     return status;
-     // }
-    
-    /*
-    * WIP to manually parse PTE entries
-    *
-    void ShowPTEData(PVOID VirtAddress)
+    for (ULONG_PTR i = 0; i < size - len; i++)
     {
-        UINT64 cr3 = __readcr3();
-        KdPrint(("CR3: 0x%08x", cr3));
+        BOOLEAN found = TRUE;
+        for (ULONG_PTR j = 0; j < len; j++)
+        {
+            if (pattern[j] != wildcard && pattern[j] != ((PCUCHAR)base)[i + j])
+            {
+                found = FALSE;
+                break;
+            }
+        }
 
-        // 47 : 39
-        UINT64 PML4_ENTRY = cr3 + ((*(UINT64*)VirtAddress)&&);
-
+        if (found != FALSE)
+        {
+            *ppFound = (PUCHAR)base + i;
+            return STATUS_SUCCESS;
+        }
     }
 
-    bool IsValidPTE(PVOID VirtAddress)
-    {
-        UINT64 cr3 = __readcr3();
-        // Page-Map Level-4 Table (PML4) (Bits 47-39)
-        UINT64 PML4_ENTRY = cr3 + ((*(UINT64*)VirtAddress) && )
-
-    }
-    */
+    return STATUS_NOT_FOUND;
+}

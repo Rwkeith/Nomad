@@ -18,7 +18,7 @@
 #define SystemModuleInformation 0x0B
 #define STACK_BUF_SIZE 0x2000
 
-#define WINAPI_IMPORT_COUNT 15
+#define WINAPI_IMPORT_COUNT 16
 #define _ZwQuerySystemInformationIDX 0
 #define _PsGetCurrentProcessIdIDX 1
 #define _PsIsSystemThreadIDX 2
@@ -34,9 +34,27 @@
 #define _KeReleaseQueuedSpinLockIDX 12
 #define _PsLookupThreadByThreadIdIDX 13
 #define _NtQueryInformationThreadIDX 14
+#define _PsGetContextThreadIDX 15
 
 #define SUCCESS 1
 #define FAIL 0
+
+#define CONTEXT_AMD64   0x00100000L
+
+// end_wx86
+
+#define CONTEXT_CONTROL         (CONTEXT_AMD64 | 0x00000001L)
+#define CONTEXT_INTEGER         (CONTEXT_AMD64 | 0x00000002L)
+#define CONTEXT_SEGMENTS        (CONTEXT_AMD64 | 0x00000004L)
+#define CONTEXT_FLOATING_POINT  (CONTEXT_AMD64 | 0x00000008L)
+#define CONTEXT_DEBUG_REGISTERS (CONTEXT_AMD64 | 0x00000010L)
+
+#define CONTEXT_FULL            (CONTEXT_CONTROL | CONTEXT_INTEGER | \
+                                 CONTEXT_FLOATING_POINT)
+
+#define CONTEXT_ALL             (CONTEXT_CONTROL | CONTEXT_INTEGER | \
+                                 CONTEXT_SEGMENTS | CONTEXT_FLOATING_POINT | \
+                                 CONTEXT_DEBUG_REGISTERS)
 
 typedef enum _KTHREAD_STATE
 {
@@ -52,7 +70,7 @@ typedef enum _KTHREAD_STATE
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY {
 	union {
-		PVOID		VirtualAddress;
+		uintptr_t	VirtualAddress;
 		ULONG_PTR	NonPaged : 1;
 	};
 	ULONG_PTR SizeInBytes;
@@ -136,6 +154,12 @@ typedef NTSTATUS (*NtQueryInformationThreadPtr)(
 	_In_            ULONG           ThreadInformationLength,
 	_Out_opt_		PULONG          ReturnLength
 	);
+typedef NTSTATUS (*NTAPI PsGetContextThreadPtr)(
+	_In_			PETHREAD Thread,
+	_Inout_			PCONTEXT ThreadContext,
+	_In_			KPROCESSOR_MODE PreviousMode
+	);
+
 
 class Utility
 {
@@ -150,7 +174,6 @@ public:
 	bool IsValidPEHeader(
 		_In_		const uintptr_t			head);
 	BOOLEAN IsWindows7();
-	
 	PVOID GetKernelBaseAddr(
 		_In_		PDRIVER_OBJECT			DriverObject);
 	NTSTATUS FindExport(
@@ -208,7 +231,20 @@ public:
 	NTSTATUS GetThreadStartAddr(
 		_In_	PETHREAD	threadObject,
 		_Out_	uintptr_t*	pStartAddr);
-
+	INT ScanBigPoolsForAddr(
+		_In_ uintptr_t addr);
+	NTSTATUS SearchPattern(
+		_In_ PCUCHAR pattern,
+		_In_ UCHAR wildcard, 
+		_In_ ULONG_PTR len, 
+		_In_ const VOID* base, 
+		_In_ ULONG_PTR size, 
+		_Out_ PVOID* ppFound);
+	BOOLEAN GetCurrentThreadContext(
+		PETHREAD threadObject);
+	NTSTATUS KbGetThreadContext(
+		IN PETHREAD threadObject);
+	void check_driver_dispatch();
 private:
 	bool mImportFail = false;
 
@@ -229,6 +265,7 @@ private:
 	KeReleaseQueuedSpinLockPtr pKeReleaseQueuedSpinLock = NULL;
 	KeAcquireQueuedSpinLockRaiseToSynchPtr pKeAcquireQueuedSpinLockRaiseToSynch = NULL;
 	NtQueryInformationThreadPtr pNtQueryInformationThread = NULL;
+	PsGetContextThreadPtr pPsGetContextThread = NULL;
 
 	PRTL_PROCESS_MODULES outProcMods = NULL;
 
@@ -247,8 +284,6 @@ private:
 	volatile signed long long gSpinLock4 = 0;
 	volatile signed long long gSpinLock5 = 0;
 	volatile signed long long gSpinLock6 = 0;
-
-	
 
 	BYTE threadStatePattern[8] = { 0x8a, 0x83, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x05 };
 	BYTE threadLockPattern[8] = {0xF0, 0x48, 0x0F, 0xBA, 0x6B, 0x00, 0x00, 0x0F};

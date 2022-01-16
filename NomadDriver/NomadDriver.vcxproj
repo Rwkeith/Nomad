@@ -238,6 +238,9 @@
       <ControlFlowGuard>false</ControlFlowGuard>
       <FunctionLevelLinking>false</FunctionLevelLinking>
       <PreprocessorDefinitions>_WIN64;_AMD64_;AMD64;VERBOSE_LOG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeLibrary>
+      </RuntimeLibrary>
     </ClCompile>
     <Link>
       <AdditionalOptions>/verbose %(AdditionalOptions)</AdditionalOptions>
@@ -254,12 +257,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Driver.cpp" />
+    <ClCompile Include="Hooks.cpp" />
+    <ClCompile Include="Memory.cpp" />
     <ClCompile Include="Threads.cpp" />
     <ClCompile Include="Utility.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common.h" />
     <ClInclude Include="Driver.h" />
+    <ClInclude Include="Hook.h" />
     <ClInclude Include="PEHdr.h" />
     <ClInclude Include="Utility.h" />
   </ItemGroup>

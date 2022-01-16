@@ -1,6 +1,7 @@
 #pragma once
 #include "Utility.h"
 #include "Driver.h"
+//#include <winnt.h>
 
 // https://www.unknowncheats.me/forum/anti-cheat-bypass/325212-eac-system-thread-detection.html
 
@@ -18,7 +19,7 @@ NTSTATUS Utility::ScanSystemThreads()
 
     PEPROCESS thisEPROC;
     BOOLEAN isSystemThread = 0;
-    HANDLE currentProcessId;
+    HANDLE systemProcId;
     PVOID systemBigPoolInformation = NULL;
     PRTL_PROCESS_MODULES systemModuleInformation = NULL;
     CONTEXT* context;
@@ -28,11 +29,14 @@ NTSTATUS Utility::ScanSystemThreads()
     NTSTATUS status;
     STACKWALK_BUFFER stackwalkBuffer;
     PETHREAD threadObject;
-    UINT32 suspiciousThreads = 0;
+    UINT32 susThreadStacks = 0;
+    UINT32 susThreadEntry = 0;
+    UINT32 mappedDriverEntry = 0;
+    uintptr_t threadStartAddr;
 
     LogInfo("ScanSystemThreads(), Starting routine\n");
-    currentProcessId = pPsGetCurrentProcessId();
-    LogInfo("\tpPsGetCurrentProcessId() returned %p\n", (VOID*)currentProcessId);
+    systemProcId = pPsGetCurrentProcessId();
+    LogInfo("\tpPsGetCurrentProcessId() returned %p\n", (VOID*)systemProcId);
     if (pPsIsSystemThread)
     {
         isSystemThread = pPsIsSystemThread((PETHREAD)__readgsqword(0x188u));
@@ -63,7 +67,7 @@ NTSTATUS Utility::ScanSystemThreads()
             }
 
             //systemModuleInformation = (PSYSTEM_MODULE_INFORMATION)result;
-
+            
             if (systemModuleInformation)
             {
                 // allocate memory to store a thread's context
@@ -77,7 +81,9 @@ NTSTATUS Utility::ScanSystemThreads()
 
                         if (status == STATUS_SUCCESS)
                         {
+#ifdef VERBOSE_LOG
                             LogInfo("\tFound valid thread id: 0x%llx (%llu)", currentThreadId, currentThreadId);
+#endif // VERBOSE_LOG
                             processObject = pIoThreadToProcess(threadObject);
 
                             if (!processObject)
@@ -94,9 +100,12 @@ NTSTATUS Utility::ScanSystemThreads()
                                 continue;
                             }
 
-                            if (processID == currentProcessId)                                      // if...the thread's pid is the same as system pid, and threadobject 
+                            if (processID == systemProcId)                                      // if...the thread's pid is the same as system pid, and threadobject 
                             {
-                                if (threadObject != (PVOID)__readgsqword(0x188))                    // and thread obj is not our current thread
+#ifndef VERBOSE_LOG
+                                LogInfo("\tFound thread belonging to system process. ID: 0x%llx (%llu)", currentThreadId, currentThreadId);
+#endif // !VERBOSE_LOG
+                               if (threadObject != (PVOID)__readgsqword(0x188))                    // and thread obj is not our current thread
                                 {
                                     if (StackwalkThread(threadObject, context, &stackwalkBuffer))   // and succesfully walks the stack of thread
                                     {
@@ -106,46 +115,87 @@ NTSTATUS Utility::ScanSystemThreads()
                                             LogInfo("\t\t\tstackwalkBuffer.EntryCount: %lu", stackwalkBuffer.EntryCount);
                                             for (size_t i = 0; i < stackwalkBuffer.EntryCount; i++)
                                             {
-                                                LogInfo("\t\t\tstackwalkBuffer.Entry[%llu].RipValue: 0x%llx", i, stackwalkBuffer.Entry[i].RipValue);
+                                                LogInfo("\t\t\tstackwalkBuffer.Entry[%llu].RipValue: 0x%p", i, (VOID*)stackwalkBuffer.Entry[i].RipValue);
                                                 if (!CheckModulesForAddress(stackwalkBuffer.Entry[i].RipValue, systemModuleInformation))
                                                 {
-                                                    LogInfo("\t\t\tSUSPICIOUS THREAD DETECTED\n");
-                                                    suspiciousThreads += 1;
+                                                    LogInfo("\t\t\t[SUSPICIOUS] Thread found with addr outside of legit modules (low confidence)\n");
+                                                    susThreadStacks += 1;
                                                     break;
+                                                }
+                                                else if(i == stackwalkBuffer.EntryCount - 1)
+                                                {
+                                                    LogInfo("\t\t\tThread stack is clean...");
                                                 }
                                             }
                                         }
                                         else
                                         {
-                                            LogInfo("\t\tAborting thread check:  No entries in thread stack");
+                                            LogInfo("\t\t\t[ABORT] Stack check:  No entries in thread stack");
                                         }
                                     }
                                     else
                                     {
-                                        LogInfo("\t\tAborting thread check:  Unsuccessful StackwalkThread() call");
+                                        LogInfo("\t\t\t[ABORT] Stack check:  Failed to walk thread's stack.");
+                                    }
+                                    
+                                    if (NT_SUCCESS(status = GetThreadStartAddr(threadObject, &threadStartAddr)))
+                                    {
+                                        
+                                        if (!CheckModulesForAddress(threadStartAddr, systemModuleInformation))
+                                        {
+                                            susThreadEntry += 1;
+                                            LogInfo("\t\t\t[DETECTION] Thread's entry 0x%p is outside of legit modules (high confidence)\n", (VOID*)threadStartAddr);
+                                            LogInfo("\t\t\tChecking if address is within an allocated pool...\n");
+                                            if (ScanBigPoolsForAddr(threadStartAddr) == 1)
+                                            {
+                                                mappedDriverEntry += 1;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            LogInfo("\t\t\tThread entry point is clean: 0x%p", (VOID*)threadStartAddr);
+                                        }
                                     }
                                 }
                                 else
                                 {
+#ifdef VERBOSE_LOG
                                     LogInfo("\t\tAborting thread check:  Our thread");
+#endif // VERBOSE_LOG
                                 }
                             }
                             else
                             {
+#ifdef VERBOSE_LOG
                                 LogInfo("\t\tAborting thread check:  Not a System thread");
+                                //GetCurrentThreadContext(threadObject);
+                                //KbGetThreadContext(threadObject);
+#endif // VERBOSE_LOG
                             }
                             ObfDereferenceObject(threadObject); // reference count was incremented by pPsLookupThreadByThreadId
                         }
                     }
 
-                    if (suspiciousThreads)
+                    if (susThreadStacks)
                     {
-                        LogInfo("Found %lu suspicious threads!", suspiciousThreads);
+                        LogInfo("[REPORT] Found %lu thread(s) with suspicious stack(s) (low confidence)", susThreadStacks);
                     }
-                    else
+
+                    if (susThreadEntry)
                     {
-                        LogInfo("No suspicious threads found.");
+                        LogInfo("[REPORT] Found %lu thread(s) with suspicious entry point(s) (high confidence)!", susThreadEntry);
                     }
+
+                    if (!susThreadStacks && !susThreadEntry)
+                    {
+                        LogInfo("[REPORT] No suspicious threads found.");
+                    }
+
+                    if (mappedDriverEntry)
+                    {
+                        LogInfo("[REPORT] Found %lu mapped driver(s)!", mappedDriverEntry);
+                    }
+
                     ExFreePool(context);
                 }
                 else
@@ -167,8 +217,61 @@ NTSTATUS Utility::ScanSystemThreads()
     return STATUS_SUCCESS;
 }
 
+NTSTATUS Utility::KbGetThreadContext(IN PETHREAD threadObject)
+{
+    if (!threadObject)
+        return STATUS_NOT_FOUND;
+
+    NTSTATUS Status = STATUS_SUCCESS;
+    
+    PCONTEXT Context = (PCONTEXT)ExAllocatePool(NonPagedPool, sizeof(CONTEXT));
+
+    //KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
+    if (!Context)
+    {
+        LogInfo("Failed to allocate pool for context.");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    RtlZeroMemory(Context, sizeof(CONTEXT));
+    // FLAGS ARE VERY SPECIFIC TO FUNCTION BEHAVIORS.  CONTEXT_ALL locks it.
+    //Context->ContextFlags = WOW64_;
+    Status = pPsGetContextThread(threadObject, Context, KernelMode);
+    LogInfo("\t\t\tpPsGetContextThread status: 0x%p", (PVOID)Status);
+    LogInfo("\t\t\tThread Context->Rip: 0x%p", (PVOID)Context->Rip);
+    ExFreePool(Context);
+    return Status;
+}
+
+BOOLEAN Utility::GetCurrentThreadContext(PETHREAD threadObject)
+{
+//    // _PETHREAD+0x2c8 WaitPrcb         : Ptr64 _KPRCB
+//    //PVOID WaitPrcb = *((PVOID*)((UINT64)threadObject + 0x2c8));
+//    //if (WaitPrcb == NULL)
+//    //{
+//    //    LogInfo("\t\t\tWaitPrcb == NULL");
+//    //    return false;
+//    //}
+//    //LogInfo("\t\t\tWaitPrcb: %p", WaitPrcb);
+//
+//    // _KPRCB+0x85c0 Context          : Ptr64 _CONTEXT
+    CONTEXT threadContext = {};
+    threadContext.ContextFlags = 0xFFFFFFFF; //00000020;
+//    if (threadContext == NULL)
+//    {
+//        LogInfo("\t\t\tthreadContext == NULL");
+//        return false;
+//    }
+//    LogInfo("\t\t\tthreadContext->Rip: %p", (PVOID)threadContext->Rip);
+
+    KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
+    pPsGetContextThread(threadObject, &threadContext, PreviousMode);
+    LogInfo("\t\t\tthreadContext->Rax: %p", (PVOID)threadContext.R9);
+    return true;
+}
+
 /// <summary>
-/// Unwinds and walks the thread's stack
+/// Unwinds and walks the thread's stack.  Can't scan threads that aren't in Waiting state.
 /// </summary>
 /// <param name="threadObject">thread being examined</param>
 /// <param name="context"></param>
@@ -188,19 +291,21 @@ BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* cont
     DWORD sectionVa;
     DWORD sectionSize;
     UINT64 textBase;
-
+    
     if (!threadObject)
         return FAIL;
     if (!stackwalkBuffer)
         return FAIL;
     memset(context, 0, sizeof(CONTEXT));
     memset(stackwalkBuffer, 0, 0x208);
-
+    
     stackBuffer = (UINT64*)ExAllocatePoolWithTag(NonPagedPool, STACK_BUF_SIZE, POOL_TAG);
     if (stackBuffer)
     {
         copiedSize = CopyThreadKernelStack(threadObject, stackBuffer);
+#ifdef VERBOSE_LOG
         LogInfo("\t\t\tCopyThreadKernelStack() stackSize is: %llu", copiedSize);
+#endif // VERBOSE_LOG
         if (copiedSize)
         {
             if (copiedSize != 0x1000 && copiedSize >= 0x48)
@@ -209,9 +314,10 @@ BOOLEAN Utility::StackwalkThread(_In_ PETHREAD threadObject, _Out_ CONTEXT* cont
                 {
                     textBase = (UINT64)((BYTE*)kernBase + sectionVa);
                     startRip = stackBuffer[7];
+#ifdef VERBOSE_LOG
                     LogInfo("\t\t\tntos textBase is: 0x%llx", textBase);
                     LogInfo("\t\t\tntos textBase end is: 0x%llx", (UINT64)textBase + sectionVa);
-                    LogInfo("\t\t\tthread's startRip is: 0x%llx", startRip);
+#endif // VERBOSE_LOG
                     if (startRip >= textBase && startRip < (UINT64)textBase + sectionVa)
                     {
                         context->Rip = startRip;
@@ -282,20 +388,25 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
     KSPIN_LOCK* threadLock;
     KIRQL oldIrql;
 
-    threadStateOffset = GetThreadStateOffset();
-    LogInfo("\t\t\tthreadStateOffset: 0x%lx", threadStateOffset);
+    threadStateOffset = GetThreadStateOffset();    
     kernelStackOffset = GetKernelStackOffset();
-    LogInfo("\t\t\tkernelStackOffset: 0x%lx", kernelStackOffset);
     threadStackBaseOffset = GetStackBaseOffset();
-    LogInfo("\t\t\tthreadStackBaseOffset: 0x%lx", threadStackBaseOffset);
 
+#ifdef VERBOSE_LOG
+    LogInfo("\t\t\tthreadStateOffset: 0x%lx", threadStateOffset);
+    LogInfo("\t\t\tkernelStackOffset: 0x%lx", kernelStackOffset);
+    LogInfo("\t\t\tthreadStackBaseOffset: 0x%lx", threadStackBaseOffset);
+#endif // VERBOSE_LOG
+    
     if (threadObject && threadStackBaseOffset)
         stackBase = *(UINT64*)(threadStackBaseOffset + (UINT64)threadObject);
     else
         stackBase = 0;
 
     threadStackLimitOffset = GetThreadStackLimit();
+#ifdef VERBOSE_LOG
     LogInfo("\t\t\tthreadStackLimitOffset: 0x%lx", threadStackLimitOffset);
+#endif // VERBOSE_LOG
     if (!threadObject)
     {
         LogError("\t\t\tCopyThreadKernelStack(): threadObject == NULL");
@@ -315,6 +426,7 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
         || (PKTHREAD)threadObject == KeGetCurrentThread())
     {
         LogInfo("\t\t\tCopyThreadKernelStack() aborted.  Examine checks.");
+        LogInfo("\t\t\tPsIsSystemThread: %d", isSystemThread);
         return 0;
     }
 
@@ -328,6 +440,8 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
 
             if (*(BYTE*)(threadStateOffset + (BYTE*)threadObject) == KTHREAD_STATE::Waiting)
             {
+                //GetCurrentThreadContext(threadObject);
+
                 if ((UINT64)*pKernelStack > threadStackLimit)
                 {
                     if ((UINT64)*pKernelStack < stackBase)
@@ -370,7 +484,9 @@ UINT32 Utility::CopyThreadKernelStack(_In_ PETHREAD threadObject, _Out_ void* ou
         if (SharedUserData->NtMajorVersion >= 6 && SharedUserData->NtMajorVersion != 6 || !SharedUserData->NtMinorVersion)  //  https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
         {
             threadLockOffset = GetThreadLockOffset();
+#ifdef VERBOSE_LOG
             LogInfo("\t\t\tthreadLockOffset: 0x%lx", threadLockOffset);
+#endif // VERBOSE_LOG
             threadLock = (KSPIN_LOCK*)((BYTE*)threadObject + threadLockOffset);
 
             if (threadLockOffset)
@@ -415,15 +531,28 @@ _Success_(return) BOOL Utility::LockThread(_In_ PKTHREAD Thread, _Out_ KIRQL * I
             if (threadLock && ThreadLockOffset)
             {
                 currentIrql = KeGetCurrentIrql();
+#ifdef VERBOSE_LOG
                 LogInfo("\t\t\tCurrent IRQL: %d", currentIrql);
+#endif // VERBOSE_LOG
                 // set cr8[3:0] (interrupt mask)
                 __writecr8(0xC);
                 *Irql = currentIrql;
-                LogInfo("\t\t\tThread State before KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
-                KeAcquireSpinLockAtDpcLevel(threadLock);
-                LogInfo("\t\t\tThread State after KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
                 currentIrql = KeGetCurrentIrql();
+#ifdef VERBOSE_LOG
+                LogInfo("\t\t\tCurrent IRQL after __writecr8(0xC): %hhu", currentIrql);
+#endif
+#ifdef VERBOSE_LOG
+                LogInfo("\t\t\tThread State before KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
+#endif
+                KeAcquireSpinLockAtDpcLevel(threadLock);
+#ifdef VERBOSE_LOG
+                LogInfo("\t\t\tThread State after KeAcquireSpinLockAtDpcLevel: %hhu", *((BYTE*)Thread + gkThreadStateOffset));
+#endif
+
+                currentIrql = KeGetCurrentIrql();
+#ifdef VERBOSE_LOG
                 LogInfo("\t\t\tCurrent IRQL after KeAcquireSpinLockAtDpcLevel: %hhu", currentIrql);
+#endif
                 return SUCCESS;
             }
             else
@@ -736,31 +865,40 @@ BOOLEAN Utility::threadStatePatternMatch(_In_ BYTE* address, _Inout_ UINT32** ou
     return FAIL;
 }
 
+/// <summary>
+/// Queries start address of the thread using NtQueryInformationThread.
+/// </summary>
+/// <param name="threadObject"></param>
+/// <param name="pStartAddr"></param>
+/// <returns></returns>
 NTSTATUS Utility::GetThreadStartAddr(_In_ PETHREAD threadObject, _Out_ uintptr_t* pStartAddr)
 {
     *pStartAddr = NULL;
     HANDLE hThread;
-    if (!NT_SUCCESS(ObOpenObjectByPointer(threadObject, OBJ_KERNEL_HANDLE, nullptr, GENERIC_READ, *PsThreadType, KernelMode, &hThread))) {
+    NTSTATUS status;
+
+    if (!NT_SUCCESS(status = ObOpenObjectByPointer(threadObject, OBJ_KERNEL_HANDLE, nullptr, GENERIC_READ, *PsThreadType, KernelMode, &hThread))) {
         LogError("ObOpenObjectByPointer failed.\n");
-        return;
+        return status;
     }
+
+    uintptr_t startAddr = NULL;
+    ULONG returnedBytes;
     
-    uintptr_t start_addr;
-    ULONG returned_bytes;
-    
-    if (!NT_SUCCESS(pNtQueryInformationThread(hThread, ThreadQuerySetWin32StartAddress, &start_addr, sizeof(start_addr), &returned_bytes))) {
+    if (!NT_SUCCESS(status = pNtQueryInformationThread(hThread, ThreadQuerySetWin32StartAddress, &startAddr, sizeof(startAddr), &returnedBytes))) {
         LogError("NtQueryInformationThread failed.\n");
         NtClose(hThread);
-        return;
+        return status;
     }
 
-    if (MmIsAddressValid((void*)start_addr)) {
-        *pStartAddr = start_addr;
+    if (MmIsAddressValid((void*)startAddr)) {
+        *pStartAddr = startAddr;
     }
     else
-        DbgPrint("(not a detection) Invalid start addr %p.\r\n", start_addr);
-
+    {
+        LogError("\t\tThread entry point not paged in: 0x%p (not a detection)\n", (uintptr_t*)startAddr);
+        return STATUS_UNSUCCESSFUL;
+    }
     NtClose(hThread);
+    return STATUS_SUCCESS;
 }
-
-//BOOLEAN IsAddressWithinBigPool(_In_ )

@@ -6,7 +6,7 @@
 
 namespace NomadDrv {
     
-    NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
+    extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
     {
         UNREFERENCED_PARAMETER(RegistryPath);
         Log("Starting Initialization\n");
@@ -46,8 +46,9 @@ namespace NomadDrv {
 
         Utility MainUtility(DriverObject);
         MainUtility.EnumKernelModuleInfo(NULL);
-        MainUtility.ScanSystemThreads();
-
+        //MainUtility.ScanSystemThreads();
+        MainUtility.check_driver_dispatch();
+        LogInfo("~Driver\n");
         // All checks complete
         return STATUS_SUCCESS;
     }
@@ -64,7 +65,7 @@ namespace NomadDrv {
     }
 
     _Use_decl_annotations_
-        NTSTATUS Create(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+    NTSTATUS Create(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     {
         UNREFERENCED_PARAMETER(DeviceObject);
 
@@ -76,7 +77,7 @@ namespace NomadDrv {
     }
 
     _Use_decl_annotations_
-        NTSTATUS Close(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+    NTSTATUS Close(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     {
         UNREFERENCED_PARAMETER(DeviceObject);
 
@@ -88,7 +89,7 @@ namespace NomadDrv {
     }
 
     _Use_decl_annotations_
-        NTSTATUS DeviceControl(PDEVICE_OBJECT, PIRP Irp)
+    NTSTATUS DeviceControl(PDEVICE_OBJECT, PIRP Irp)
     {
         // get our IO_STACK_LOCATION
         auto stack = IoGetCurrentIrpStackLocation(Irp);

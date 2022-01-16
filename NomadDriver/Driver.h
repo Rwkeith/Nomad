@@ -105,11 +105,56 @@ extern "C" {
 		KPROCESSOR_MODE PreviousMode,
 		PSIZE_T ReturnSize
 	);
+
+	NTKERNELAPI
+		POBJECT_TYPE
+		NTAPI
+		ObGetObjectType(
+			_In_ PVOID Object
+		);
+	// https://github.com/processhacker/processhacker/blob/1aa402b6a29e8b60d5c93c8385c68f719896cb24/KProcessHacker/include/ntfill.h#L261
+	NTKERNELAPI
+		NTSTATUS
+		NTAPI
+		ObOpenObjectByName(
+			_In_ POBJECT_ATTRIBUTES ObjectAttributes,
+			_In_ POBJECT_TYPE ObjectType,
+			_In_ KPROCESSOR_MODE PreviousMode,
+			_In_opt_ PACCESS_STATE AccessState,
+			_In_opt_ ACCESS_MASK DesiredAccess,
+			_In_opt_ PVOID ParseContext,
+			_Out_ PHANDLE Handle
+		);
+
+	// https://github.com/processhacker/processhacker/blob/27c3377a9c1d3500396ed886af3d070890a68164/phnt/include/ntzwapi.h#L2765
+	NTSYSCALLAPI
+		NTSTATUS
+		NTAPI
+		ZwQueryDirectoryObject(
+			_In_ HANDLE DirectoryHandle,
+			_Out_writes_bytes_opt_(Length) PVOID Buffer,
+			_In_ ULONG Length,
+			_In_ BOOLEAN ReturnSingleEntry,
+			_In_ BOOLEAN RestartScan,
+			_Inout_ PULONG Context,
+			_Out_opt_ PULONG ReturnLength
+		);
+
+	// https://doxygen.reactos.org/db/d18/obref_8c.html#a727c1f0726c97a4d0f526d541cee1f6a
+	NTSTATUS
+		NTAPI
+		ObReferenceObjectByName(IN PUNICODE_STRING ObjectPath,
+			IN ULONG Attributes,
+			IN PACCESS_STATE PassedAccessState,
+			IN ACCESS_MASK DesiredAccess,
+			IN POBJECT_TYPE ObjectType,
+			IN KPROCESSOR_MODE AccessMode,
+			IN OUT PVOID ParseContext,
+			OUT PVOID* ObjectPtr);
 }
 
 namespace NomadDrv {
-	NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
-
+	extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath);
 	NTSTATUS Create(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
 	NTSTATUS Close(_In_ PDEVICE_OBJECT DeviceObject, PIRP Irp);
 	NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT, _Inout_ PIRP Irp);
