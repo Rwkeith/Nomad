@@ -46,7 +46,7 @@ namespace NomadDrv {
 
         Utility MainUtility(DriverObject);
         MainUtility.EnumKernelModuleInfo(NULL);
-        //MainUtility.ScanSystemThreads();
+        MainUtility.ScanSystemThreads();
         MainUtility.check_driver_dispatch();
         LogInfo("~Driver\n");
         // All checks complete

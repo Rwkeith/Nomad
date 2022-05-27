@@ -195,7 +195,7 @@ public:
 		_In_	UINT64					address, 
 		_In_	PRTL_PROCESS_MODULES	procMods);
 	_Success_(return) BOOLEAN GetNtoskrnlSection(
-		_In_	char*		sectionName, 
+		_In_	const char*		sectionName, 
 		_Out_	DWORD*		sectionVa, 
 		_Out_	DWORD*		sectionSize);
 	UINT32 SpinLock(

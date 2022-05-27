@@ -2,6 +2,8 @@
 #include "Utility.h"
 #include "Hook.h"
 
+
+
 void Utility::check_driver_dispatch()
 {
 	HANDLE hDir;
@@ -31,9 +33,9 @@ void Utility::check_driver_dispatch()
 		return;
 	}
 
-	auto dir_info = (PDIRECTORY_BASIC_INFORMATION)ExAllocatePoolWithTag(POOL_TYPE::NonPagedPool, PAGE_SIZE, POOL_TAG);
+	auto dirInfo = (PDIRECTORY_BASIC_INFORMATION)ExAllocatePoolWithTag(POOL_TYPE::NonPagedPool, PAGE_SIZE, POOL_TAG);
 
-	if (!dir_info)
+	if (!dirInfo)
 	{
 		LogError("checkDispatch() Failed to allocate pool.");
 		return;
@@ -41,18 +43,20 @@ void Utility::check_driver_dispatch()
 
 	ULONG ulContext = 0;
 
-	ULONG returned_bytes;
+	ULONG returnedBytes;
 	bool isClean = true;
 	int suspiciousDrivers = 0;
-	while (NT_SUCCESS(ZwQueryDirectoryObject(h, dir_info, PAGE_SIZE, TRUE, FALSE, &ulContext, &returned_bytes))) {
+	while (NT_SUCCESS(ZwQueryDirectoryObject(h, dirInfo, PAGE_SIZE, TRUE, FALSE, &ulContext, &returnedBytes)))
+	{
 		isClean = true;
 		PDRIVER_OBJECT pObj;
 		wchar_t wsDriverName[100] = L"\\Driver\\";
-		wcscat(wsDriverName, dir_info->ObjectName.Buffer);
-		UNICODE_STRING ObjName;
-		ObjName.Length = ObjName.MaximumLength = wcslen(wsDriverName) * 2;
-		ObjName.Buffer = wsDriverName;
-		if (NT_SUCCESS(ObReferenceObjectByName(&ObjName, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL, *IoDriverObjectType, KernelMode, nullptr, (PVOID*)&pObj))) {
+		wcscat(wsDriverName, dirInfo->ObjectName.Buffer);
+		UNICODE_STRING objName;
+		objName.Length = objName.MaximumLength = wcslen(wsDriverName) * 2;
+		objName.Buffer = wsDriverName;
+		if (NT_SUCCESS(ObReferenceObjectByName(&objName, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL, *IoDriverObjectType, KernelMode, nullptr, (PVOID*)&pObj)))
+		{
 			LogInfo("Checking driver object: %ls", wsDriverName);
 			LogInfo("\t\tChecking ->MajorFunction[IRP_MJ_DEVICE_CONTROL]");
 			if (!CheckModulesForAddress(reinterpret_cast<uintptr_t>(pObj->MajorFunction[IRP_MJ_DEVICE_CONTROL]), outProcMods)) {
@@ -66,11 +70,6 @@ void Utility::check_driver_dispatch()
 				isClean = false;
 			}
 
-			//auto dd = reinterpret_cast<uintptr_t>(pObj->MajorFunction[IRP_MJ_DEVICE_CONTROL]);
-			//if (dd < (uintptr_t)pObj->DriverStart || dd > (uintptr_t)pObj->DriverStart + pObj->DriverSize) {
-			//	LogInfo("[DETECTION] %wZ driver has spoofed driver dispatch (2)", pObj->DriverName);
-			//	isClean = false;
-			//}
 			LogInfo("\t\tChecking ->FastIoDispatch");
 			if (reinterpret_cast<uintptr_t>(pObj->FastIoDispatch))
 			{
@@ -83,7 +82,7 @@ void Utility::check_driver_dispatch()
 			{
 				LogInfo("\t\t\tFastIoDispatch == NULL");
 			}
-
+			
 			if (isClean)
 			{
 				LogInfo("Driver object clean.");

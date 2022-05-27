@@ -37,9 +37,10 @@ NTSTATUS Utility::InitUtils(_In_ PDRIVER_OBJECT DriverObject)
 
     LogInfo("Frostiest method:  Found ntoskrnl.exe base @ 0x%p\n", kernBase);
 
-    kernBase = GetNtoskrnlBaseAddress();
+    // On 21H1, this method doesn't work.  Issue is that there are multiple PE Headers between the true PE Header of ntoskrnl and from where the IDT entry points to.
+    //kernBase = GetNtoskrnlBaseAddress();
 
-    LogInfo("Barakat method: Found ntoskrnl.exe base @ 0x%p\n", kernBase);
+    //LogInfo("Barakat method: Found ntoskrnl.exe base @ 0x%p\n", kernBase);
 
     status = FindExport((uintptr_t)kernBase, "MmGetSystemRoutineAddress", (uintptr_t*)&pMmSysRoutine);
 
@@ -100,9 +101,9 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
         return status;
     }
 
-    auto whatIsthisAddr = *(long long*)((int*)outProcMods + 6);
+    //auto whatIsthisAddr = *(long long*)((int*)outProcMods + 6);
     //LogInfo("whatIsthisAddr: %016X", outProcMods->Modules->);
-    LogInfo("whatIsthisAddr: %x", whatIsthisAddr);
+    //LogInfo("whatIsthisAddr: %x", whatIsthisAddr);
 
     if (procMods != NULL)
     {
@@ -134,7 +135,7 @@ NTSTATUS Utility::EnumKernelModuleInfo(_In_opt_ PRTL_PROCESS_MODULES* procMods)
 NTSTATUS Utility::ImportNtPrimitives()
 {
     LogInfo("Importing windows primitives\n");
-    wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation",    L"PsGetCurrentProcessId",       L"PsIsSystemThread",             L"PsGetCurrentProcess", 
+    const wchar_t* names[WINAPI_IMPORT_COUNT] = { L"ZwQuerySystemInformation",    L"PsGetCurrentProcessId",       L"PsIsSystemThread",             L"PsGetCurrentProcess", 
                                             L"IoThreadToProcess",           L"PsGetProcessId",              L"RtlVirtualUnwind",             L"RtlLookupFunctionEntry", 
                                             L"KeAlertThread",               L"PsGetCurrentThreadStackBase", L"PsGetCurrentThreadStackLimit", L"KeAcquireQueuedSpinLockRaiseToSynch", 
                                             L"KeReleaseQueuedSpinLock",     L"PsLookupThreadByThreadId",    L"NtQueryInformationThread",     L"PsGetContextThread"};
@@ -183,16 +184,6 @@ NTSTATUS Utility::ImportNtPrimitives()
 
 bool Utility::IsValidPEHeader(_In_ const uintptr_t pHead)
 {
-    // ideally should parse the PT so this can't be IAT spoofed
-    __try
-    {
-
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        LogInfo("Exception executed for 0x%p , ExceptionCode == 0x%p", (PVOID)pHead, GetExceptionCode());
-        return false;
-    }
     if (!MmIsAddressValid((PVOID)pHead))
     {
 #ifdef VERBOSE_LOG
@@ -321,6 +312,7 @@ PVOID Utility::GetKernelBaseAddr(_In_ PDRIVER_OBJECT DriverObject)
 // @ Barakat , GS Register, reverse page walk until MZ header of ntos
 // https://gist.github.com/Barakat/34e9924217ed81fd78c9c92d746ec9c6
 // Lands above nt module, but can page fault! Tweak to check PTE's instead of using MmIsAddressValid.  Refer to:  https://www.unknowncheats.me/forum/anti-cheat-bypass/437451-whats-proper-write-read-physical-memory.html
+// NOTE: not working on 21H1.  Multiple PE Headers exist before true nt header is reached.  could tweak though.
 PVOID Utility::GetNtoskrnlBaseAddress()
 {
 #pragma pack(push, 1)
@@ -458,7 +450,7 @@ BOOLEAN Utility::CheckModulesForAddress(_In_ UINT64 address, _In_ PRTL_PROCESS_M
 /// <param name="sectionVa">RVA from section base</param>
 /// <param name="sectionSize">Virtual size</param>
 /// <returns>1 on success</returns>
-_Success_(return) BOOLEAN Utility::GetNtoskrnlSection(_In_ char* sectionName, _Out_ DWORD* sectionVa, _Out_ DWORD* sectionSize)
+_Success_(return) BOOLEAN Utility::GetNtoskrnlSection(_In_ const char* sectionName, _Out_ DWORD* sectionVa, _Out_ DWORD* sectionSize)
 {
     if (!kernBase)
     {
