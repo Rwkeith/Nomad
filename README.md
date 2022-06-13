@@ -8,6 +8,12 @@ Uses known heuristic detection methods to find manulaly mapped kernel code and s
 - Stack walk system threads
 - Check thread entry points
 
+**Hook Detection**
+- Checks for driver IOCTL hooks
+
+**Big Pool Scans**
+- Checks big pools referenced by a non-legit address
+
 <img src="NomadOutput.png" width="600" height="300">
 
 # Credits
